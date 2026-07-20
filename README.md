@@ -1,1 +1,136 @@
-# alertU
+# AlertU
+
+A Linux re-imagining of the old Mac **iAlertU**: a cheap USB/Bluetooth HID remote
+becomes the "key fob" for a car-alarm-style guard on your computer. Click to arm
+(the session locks with a chirp); anyone who touches the keyboard or mouse while
+it's armed trips a countdown, and if you don't disarm in time it wails a siren and
+snaps a webcam photo of whoever it is.
+
+It is a **personal gadget**, not an anti-theft system — see the threat-model note
+below.
+
+## How it works
+
+```
+        click remote / force-arm
+Idle ───────────────────────────► Armed ──(session locked, watching inputs)
+ ▲                                  │
+ │ click remote, or                 │ input activity after grace period
+ │ password unlock                  ▼
+ │                              Triggered ──(countdown + quiet warning tick)
+ │  password unlock / click         │
+ ├──────────────────────────────────┤ countdown expires
+ │                                  ▼
+ └──────────────────────────────── Alarm ──(siren loop + webcam snapshot + webhook)
+```
+
+* **Arm** — a click on the remote's button locks the session
+  (`loginctl lock-session`) and plays a short chirp.
+* **Disarm** — whichever comes first wins: another click on the remote, or a
+  normal password unlock (detected by polling the session's `LockedHint`).
+* **Intrusion** — while armed, any activity on the watched input devices
+  (everything except the remote and the main mouse, by default) moves to
+  `Triggered`.
+* **Countdown** — an adjustable `alarm_delay_secs` runs with a discreet warning
+  tick. Unlock in time and everything resets to `Idle`; otherwise the siren
+  loops, a timestamped webcam snapshot is saved, and the optional webhook fires.
+
+### Generic remote support
+
+Nothing is hardcoded to a specific model. Any USB/Bluetooth device that shows up
+as a standard HID node under `/dev/input/eventX` works — you pick the remote and
+the watched devices from the tray. The reference device is an **AB Shutter 3**
+(AIROHA AB1126A) that enumerates as a keyboard sending `KEY_VOLUMEUP` or
+`KEY_ENTER`, but `toggle_keys` accepts any evdev key name, resolved generically
+via evdev's `KeyCode` name table.
+
+## Architecture
+
+Two components talk over a local Unix socket
+(`/run/alertu/alertu.sock`, newline-delimited JSON):
+
+| Crate | Binary | Role |
+|-------|--------|------|
+| `alertu-common` | — | Shared config, state enum, and IPC protocol. |
+| `alertu-daemon` | `alertu-daemon` | Privileged: evdev reading, the state machine, session lock/unlock, audio, snapshots, webhook. |
+| `alertu-gui` | `alertu-gui` | Per-session tray (StatusNotifierItem via `ksni`) reflecting state, with device selection and settings in its menu. |
+
+The daemon is the only component that touches `/dev/input` and the webcam, so it
+also enumerates devices and reports them to the GUI over IPC — the GUI needs no
+special privileges.
+
+### State machine
+
+A single task owns all mutable state and drives transitions from four multiplexed
+sources: input signals (remote/intrusion), session lock-state changes (password
+unlock), IPC control commands, and internal timers (the countdown and warning
+ticks). See `crates/alertu-daemon/src/machine.rs`.
+
+## Build
+
+```sh
+cargo build --release
+# binaries: target/release/alertu-daemon, target/release/alertu-gui
+cargo test --workspace   # unit tests for config, device resolution, key parsing
+```
+
+Requires a recent stable Rust toolchain. No system dev libraries are needed:
+the tray uses pure-Rust `zbus` (no `libdbus`), and audio/snapshot/webhook shell
+out to external tools rather than linking C libraries.
+
+## Install (systemd)
+
+```sh
+sudo install -Dm755 target/release/alertu-daemon /usr/local/bin/alertu-daemon
+install  -Dm755 target/release/alertu-gui        ~/.local/bin/alertu-gui
+sudo useradd --system --groups input,video alertu   # dedicated daemon user
+sudo install -Dm644 packaging/config.example.toml /etc/alertu/config.toml
+sudo install -Dm644 packaging/alertu-daemon.service /etc/systemd/system/alertu-daemon.service
+sudo systemctl enable --now alertu-daemon
+
+install -Dm644 packaging/alertu-gui.service ~/.config/systemd/user/alertu-gui.service
+systemctl --user enable --now alertu-gui
+```
+
+Put three WAV files where the config points (`beep`, `warning`, `siren`), and
+make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
+`paplay`/`pw-play`/`aplay`/`ffplay`/`play` (audio) are installed.
+
+## Configuration
+
+TOML, loaded at daemon startup and editable live from the tray. See
+[`packaging/config.example.toml`](packaging/config.example.toml) for every field
+with inline docs. Highlights: `remote_device`/`remote_name_hint`, `toggle_keys`,
+`watch_devices` (`["auto"]` or explicit paths), `grace_period_secs`,
+`alarm_delay_secs`, the three sound paths, `snapshot_dir`/`camera_device`, and
+the optional `alarm_webhook_url`.
+
+## Platform
+
+Linux with systemd. Works across X11 and Wayland because it only uses
+`logind`/`loginctl` — no dependency on a specific compositor or desktop. The user
+must be in the `input` and `video` groups.
+
+## Deliberate scope & design choices
+
+* **Audio and snapshots shell out** to external tools (`paplay`/`ffplay`/…,
+  `fswebcam`/`ffmpeg`). This keeps the daemon free of ALSA/PulseAudio and camera
+  build dependencies and matches the spec's choice to shell out for capture. The
+  `sound` module is a thin wrapper, so swapping in `rodio` later is localized.
+* **Settings live in the tray menu.** Device selection and the tunable delays are
+  driven from the StatusNotifierItem menu (submenus + checkmarks) rather than a
+  separate toolkit window, so the GUI needs no GTK/Qt/X11 dev libraries. A richer
+  standalone settings window could be layered on later.
+* **The webhook is the only forward-looking hook** kept in scope (v1 has no full
+  mobile pairing), fired via `curl` so there's no HTTP/TLS client dependency.
+
+### Threat-model note
+
+This is a personal convenience gadget, not a hardened security product. The IPC
+socket is created world-connectable (`0o666`) so a normal desktop session can
+reach the root/`alertu`-owned daemon; there is no binary anti-tampering. Don't
+rely on it as a real anti-theft mechanism.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

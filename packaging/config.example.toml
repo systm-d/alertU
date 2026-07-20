@@ -1,0 +1,59 @@
+# AlertU daemon configuration.
+#
+# Default location: /etc/alertu/config.toml (system service) or
+# $XDG_CONFIG_HOME/alertu/config.toml. Override with `alertu-daemon --config <path>`.
+#
+# Every value below is a default; delete a line to keep its built-in default.
+# The GUI can edit and persist this file live over the IPC socket.
+
+# --- Remote ("key fob") -----------------------------------------------------
+
+# evdev path of the remote, or "auto" to match by name.
+remote_device = "auto"
+
+# When remote_device = "auto", the first device whose name contains this
+# substring (case-insensitive) is used. The reference device is the AB Shutter 3.
+remote_name_hint = "AB Shutter"
+
+# evdev key name(s) that arm/disarm. The AB Shutter 3 sends KEY_VOLUMEUP or
+# KEY_ENTER depending on its iOS/Android mode; any listed key acts as the toggle.
+# Use any name evdev knows, e.g. KEY_PLAYPAUSE, KEY_SPACE, BTN_0 — nothing is
+# hardcoded to a specific model.
+toggle_keys = ["KEY_VOLUMEUP", "KEY_ENTER"]
+
+# --- Intrusion watch --------------------------------------------------------
+
+# Devices watched for activity while armed. Either an explicit list of paths,
+# or ["auto"] meaning "every input device except the remote and the main mouse".
+# The main mouse is detected by its REL_X/REL_Y + BTN_LEFT capabilities.
+watch_devices = ["auto"]
+
+# Seconds after arming before intrusion detection goes live (walk-away grace).
+grace_period_secs = 15
+
+# Seconds between intrusion (Triggered) and the siren firing (Alarm). A quiet
+# warning tick plays during this window; unlocking cancels everything.
+alarm_delay_secs = 10
+
+# --- Session ----------------------------------------------------------------
+
+# logind session to lock/unlock, or "auto" for the active session on seat0.
+session_id = "auto"
+
+# --- Sounds -----------------------------------------------------------------
+
+# Played once on arm/disarm; discreetly during the countdown; looped on alarm.
+beep_sound    = "/usr/share/sounds/alertu/beep.wav"
+warning_sound = "/usr/share/sounds/alertu/warning.wav"
+siren_sound   = "/usr/share/sounds/alertu/siren.wav"
+
+# --- Webcam snapshot --------------------------------------------------------
+
+snapshot_dir  = "/var/lib/alertu/snapshots"
+camera_device = "/dev/video0"
+
+# --- Optional forward-looking hook ------------------------------------------
+
+# HTTP endpoint POSTed (via curl) when entering Alarm. Empty disables it.
+# Body: {"event":"alarm","state":"alarm","timestamp":"<rfc3339>"}
+alarm_webhook_url = ""

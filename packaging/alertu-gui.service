@@ -1,0 +1,14 @@
+[Unit]
+Description=AlertU tray (per-session GUI)
+Documentation=https://github.com/systm-d/alertu
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/alertu-gui
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,25 @@
+[package]
+name = "alertu-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AlertU privileged daemon: evdev, state machine, session lock, audio, snapshots."
+
+[[bin]]
+name = "alertu-daemon"
+path = "src/main.rs"
+
+[dependencies]
+alertu-common = { path = "../alertu-common" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+directories.workspace = true
+evdev = { version = "0.13", features = ["tokio"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

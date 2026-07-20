@@ -1,0 +1,22 @@
+[package]
+name = "alertu-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AlertU per-session GUI: StatusNotifierItem tray, device selection and settings."
+
+[[bin]]
+name = "alertu-gui"
+path = "src/main.rs"
+
+[dependencies]
+alertu-common = { path = "../alertu-common" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+ksni = "0.3"
