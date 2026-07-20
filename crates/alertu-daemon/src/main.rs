@@ -10,6 +10,7 @@ mod machine;
 mod session;
 mod snapshot;
 mod sound;
+mod transitions;
 mod webhook;
 
 use alertu_common::config::Config;

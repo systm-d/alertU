@@ -13,6 +13,7 @@ use crate::input::{self, InputSignal};
 use crate::session::SessionCtl;
 use crate::snapshot;
 use crate::sound::SoundPlayer;
+use crate::transitions::{decide, Effect, Event};
 use crate::webhook;
 use alertu_common::config::Config;
 use alertu_common::state::GuardState;
@@ -142,12 +143,12 @@ impl Machine {
         match sig {
             InputSignal::RemoteToggle => {
                 info!("remote toggle");
-                self.toggle().await;
+                self.apply(Event::Toggle).await;
             }
             InputSignal::Activity { source } => {
                 if self.state == GuardState::Armed && self.grace_elapsed() {
                     info!(%source, "intrusion detected");
-                    self.enter_triggered();
+                    self.apply(Event::Intrusion).await;
                 }
             }
         }
@@ -156,26 +157,19 @@ impl Machine {
     async fn on_lock(&mut self, locked: bool) {
         // We only care about an *unlock* while the alarm is engaged: a normal
         // password unlock disarms, racing the remote — whichever fires first
-        // wins. The session is already unlocked, so we don't call loginctl.
+        // wins. `decide` emits no unlock effect here, since the session is
+        // already unlocked.
         if !locked && self.state.is_active() {
             info!("session unlocked externally; disarming");
-            self.reset_to_idle(false).await;
+            self.apply(Event::SessionUnlocked).await;
         }
     }
 
     async fn on_control(&mut self, ctrl: Control) {
         match ctrl {
-            Control::Toggle => self.toggle().await,
-            Control::Arm => {
-                if self.state == GuardState::Idle {
-                    self.arm().await;
-                }
-            }
-            Control::Disarm => {
-                if self.state.is_active() {
-                    self.reset_to_idle(true).await;
-                }
-            }
+            Control::Toggle => self.apply(Event::Toggle).await,
+            Control::Arm => self.apply(Event::ForceArm).await,
+            Control::Disarm => self.apply(Event::ForceDisarm).await,
             Control::GetConfig(tx) => {
                 let _ = tx.send(self.cfg.clone());
             }
@@ -192,6 +186,8 @@ impl Machine {
         }
         let now = Instant::now();
 
+        // Warning ticks are periodic within `Triggered`, not a state change, so
+        // they live here rather than in the transition table.
         if let Some(warn_at) = self.next_warning {
             if now >= warn_at {
                 self.sound.play_once(&self.cfg.warning_sound);
@@ -201,57 +197,50 @@ impl Machine {
 
         if let Some(alarm_at) = self.alarm_deadline {
             if now >= alarm_at {
-                self.enter_alarm().await;
+                self.apply(Event::CountdownElapsed).await;
             }
         }
     }
 
-    // --- transitions ------------------------------------------------------
+    // --- transition interpreter -------------------------------------------
 
-    async fn toggle(&mut self) {
-        match self.state {
-            GuardState::Idle => self.arm().await,
-            _ => self.reset_to_idle(true).await,
+    /// Run one event through the pure [`decide`] table and interpret its
+    /// effects, then commit the new state.
+    async fn apply(&mut self, event: Event) {
+        let Some(transition) = decide(self.state, event) else {
+            return;
+        };
+        for effect in transition.effects {
+            self.run_effect(effect).await;
         }
+        self.set_state(transition.next);
     }
 
-    async fn arm(&mut self) {
-        self.session.lock().await;
-        self.sound.play_once(&self.cfg.beep_sound);
-        self.grace_until = Some(Instant::now() + Duration::from_secs(self.cfg.grace_period_secs));
-        self.set_state(GuardState::Armed);
-    }
-
-    /// Return to `Idle`. When `do_unlock` is set we actively unlock the session
-    /// (remote/forced disarm); when it's false the session was already unlocked
-    /// by the user, so we only tear down alarm state.
-    async fn reset_to_idle(&mut self, do_unlock: bool) {
-        if do_unlock {
-            self.session.unlock().await;
+    /// Perform a single side effect. This is the only place I/O happens.
+    async fn run_effect(&mut self, effect: Effect) {
+        match effect {
+            Effect::LockSession => self.session.lock().await,
+            Effect::UnlockSession => self.session.unlock().await,
+            Effect::PlayBeep => self.sound.play_once(&self.cfg.beep_sound),
+            Effect::StartSiren => self.sound.start_siren(&self.cfg.siren_sound),
+            Effect::StopSiren => self.sound.stop_siren(),
+            Effect::Snapshot => snapshot::capture_async(self.cfg.clone()),
+            Effect::Webhook => webhook::fire(&self.cfg.alarm_webhook_url, GuardState::Alarm),
+            Effect::StartGrace => {
+                self.grace_until =
+                    Some(Instant::now() + Duration::from_secs(self.cfg.grace_period_secs));
+            }
+            Effect::StartCountdown => {
+                let now = Instant::now();
+                self.alarm_deadline = Some(now + Duration::from_secs(self.cfg.alarm_delay_secs));
+                self.next_warning = Some(now);
+            }
+            Effect::ClearTimers => {
+                self.grace_until = None;
+                self.alarm_deadline = None;
+                self.next_warning = None;
+            }
         }
-        self.sound.stop_siren();
-        self.sound.play_once(&self.cfg.beep_sound);
-        self.grace_until = None;
-        self.alarm_deadline = None;
-        self.next_warning = None;
-        self.set_state(GuardState::Idle);
-    }
-
-    fn enter_triggered(&mut self) {
-        let now = Instant::now();
-        self.alarm_deadline = Some(now + Duration::from_secs(self.cfg.alarm_delay_secs));
-        self.next_warning = Some(now);
-        self.set_state(GuardState::Triggered);
-    }
-
-    async fn enter_alarm(&mut self) {
-        self.alarm_deadline = None;
-        self.next_warning = None;
-        self.set_state(GuardState::Alarm);
-
-        self.sound.start_siren(&self.cfg.siren_sound);
-        snapshot::capture_async(self.cfg.clone());
-        webhook::fire(&self.cfg.alarm_webhook_url, GuardState::Alarm);
     }
 
     fn set_state(&mut self, new: GuardState) {
