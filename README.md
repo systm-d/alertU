@@ -57,8 +57,8 @@ Unix socket (`/run/alertu/alertu.sock`, newline-delimited JSON):
 |-------|--------|------|
 | `alertu-common` | — | Shared config, state enum, and IPC protocol (plus a blocking socket client behind the `ipc-client` feature). |
 | `alertu-daemon` | `alertu-daemon` | Privileged: evdev reading, the state machine, session lock/unlock, audio, snapshots, webhook, `/dev/input` hotplug. |
-| `alertu-gui` | `alertu-gui` | Per-session tray (StatusNotifierItem via `ksni`) reflecting state, with quick device selection and settings in its menu. |
-| `alertu-settings` | `alertu-settings` | Standalone settings window (egui/eframe) for full config editing; launched from the tray's "Open settings…" item. |
+| `alertu-gui` | `alertu-gui` | Per-session tray (StatusNotifierItem via `ksni`) reflecting state, with quick device selection and settings in its menu. Survives a daemon restart: the icon stays put, the tooltip reads "Daemon offline" and the action items grey out until it reconnects. |
+| `alertu-settings` | `alertu-settings` | Standalone settings window (egui/eframe) for full config editing; launched from the tray's "Open settings…" item. Reconnects transparently if the daemon restarts under it. |
 | `alertu-ctl` | `alertu-ctl` | Command line: arm/disarm/toggle, state, config and devices — scriptable, with a `--json` mode. |
 
 The daemon is the only component that touches `/dev/input` and the webcam, so it
@@ -107,12 +107,14 @@ sudo systemd-sysusers packaging/sysusers.d/alertu.conf
 
 sudo install -Dm644 packaging/config.example.toml /etc/alertu/config.toml
 sudo install -Dm644 packaging/alertu-daemon.service /etc/systemd/system/alertu-daemon.service
+
+# Before starting the daemon, so its first arm does not chirp into missing files.
+sudo alertu-ctl gen-sounds --dir /usr/share/sounds/alertu
+
 sudo systemctl enable --now alertu-daemon
 
 install -Dm644 packaging/alertu-gui.service ~/.config/systemd/user/alertu-gui.service
 systemctl --user enable --now alertu-gui
-
-sudo alertu-ctl gen-sounds --dir /usr/share/sounds/alertu
 
 # Application icon and menu entry for the settings window.
 for s in 48 64 128 256 512; do
