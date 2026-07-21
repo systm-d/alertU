@@ -1,8 +1,11 @@
-//! logind session control and lock-state monitoring via `loginctl`.
+//! logind session control and lock-state monitoring.
 //!
-//! We deliberately shell out to `loginctl` rather than talking to logind over
-//! D-Bus: it keeps the daemon free of a D-Bus client dependency and matches the
-//! spec, which calls for observing `LockedHint` through `loginctl`.
+//! Actions (`lock`, `unlock`) always shell out to `loginctl`: they are rare, and
+//! staying on the CLI keeps the black-box tests' `PATH` shim in control of them.
+//!
+//! Lock-state *observation* prefers a D-Bus subscription to `PropertiesChanged`
+//! on `LockedHint`, falling back to polling `loginctl` when the bus or the
+//! session is unavailable — see [`watch`].
 
 use alertu_common::config::Config;
 use std::sync::{Arc, Mutex};
@@ -158,4 +161,72 @@ pub async fn monitor(session: SessionCtl, tx: mpsc::Sender<bool>, interval: Dura
             }
         }
     }
+}
+
+/// Observe the session's lock state, preferring D-Bus and falling back to
+/// polling.
+///
+/// A precision that shapes this: logind's `Lock`/`Unlock` signals are *requests*
+/// addressed to the screen locker, not notifications that anything changed. The
+/// observable state change is `PropertiesChanged` on `LockedHint`, which is the
+/// real-time equivalent of what `monitor` polls.
+///
+/// Any failure — no system bus, an unknown session, a dropped stream — falls
+/// back to the poll loop rather than leaving the daemon blind, because unlock
+/// detection is what disarms the alarm after a password unlock.
+pub async fn watch(session: SessionCtl, tx: mpsc::Sender<bool>, poll_interval: Duration) {
+    match dbus_watch(&session.id(), &tx).await {
+        Ok(()) => warn!("logind property stream ended; falling back to polling"),
+        Err(e) => warn!(error = %e, "cannot observe logind over D-Bus; falling back to polling"),
+    }
+    monitor(session, tx, poll_interval).await;
+}
+
+/// Subscribe to `LockedHint` changes. Returns `Ok(())` only when the stream ends.
+async fn dbus_watch(session_id: &str, tx: &mpsc::Sender<bool>) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+
+    if session_id.is_empty() {
+        anyhow::bail!("no session id resolved");
+    }
+
+    let conn = zbus::Connection::system().await?;
+
+    let manager = zbus::Proxy::new(
+        &conn,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await?;
+    let path: zbus::zvariant::OwnedObjectPath = manager.call("GetSession", &(session_id,)).await?;
+    debug!(session = %session_id, path = %path.as_str(), "watching logind session over D-Bus");
+
+    let props = zbus::fdo::PropertiesProxy::builder(&conn)
+        .destination("org.freedesktop.login1")?
+        .path(path)?
+        .build()
+        .await?;
+
+    let wanted = zbus::names::InterfaceName::try_from("org.freedesktop.login1.Session")?;
+    let mut changes = props.receive_properties_changed().await?;
+
+    while let Some(signal) = changes.next().await {
+        let args = signal.args()?;
+        if args.interface_name != wanted {
+            continue;
+        }
+        if let Some(value) = args.changed_properties.get("LockedHint") {
+            match bool::try_from(value.try_clone()?) {
+                Ok(locked) => {
+                    debug!(locked, "logind reported a lock-state change");
+                    if tx.send(locked).await.is_err() {
+                        return Ok(()); // the machine shut down
+                    }
+                }
+                Err(e) => warn!(error = %e, "LockedHint was not a boolean"),
+            }
+        }
+    }
+    Ok(())
 }

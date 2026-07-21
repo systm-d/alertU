@@ -120,8 +120,8 @@ async fn main() -> Result<()> {
     info!(session = %session.id(), "controlling logind session");
     let sound = SoundPlayer::new();
 
-    // Session lock-state monitor (detects password unlock while armed).
-    tokio::spawn(session::monitor(
+    // Session lock-state observation: D-Bus when available, polling otherwise.
+    tokio::spawn(session::watch(
         session.clone(),
         lock_tx,
         Duration::from_millis(500),

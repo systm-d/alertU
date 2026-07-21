@@ -31,7 +31,8 @@ Idle ─────────────────────────
 * **Arm** — a click on the remote's button locks the session
   (`loginctl lock-session`) and plays a short chirp.
 * **Disarm** — whichever comes first wins: another click on the remote, or a
-  normal password unlock (detected by polling the session's `LockedHint`).
+  normal password unlock (detected from logind's `LockedHint` over D-Bus,
+  falling back to polling `loginctl` when the bus is unavailable).
 * **Intrusion** — while armed, any activity on the watched input devices
   (everything except the remote and the main mouse, by default) moves to
   `Triggered`.
