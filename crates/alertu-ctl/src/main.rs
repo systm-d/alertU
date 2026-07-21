@@ -13,8 +13,15 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use render::Outcome;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+/// Something went wrong on the daemon side: it refused the request, or there
+/// was nothing listening on the socket at all.
+const EXIT_DAEMON: u8 = 1;
+/// Bad input from the caller, caught locally before any socket is touched.
+/// Same code clap uses for a malformed command line.
+const EXIT_USAGE: u8 = 2;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -60,35 +67,66 @@ enum Command {
     ListDevices,
 }
 
+/// A failure together with the exit code it maps to, so the shell can tell
+/// "the daemon said no" (1) from "you asked for something impossible" (2).
+#[derive(Debug)]
+struct CliError {
+    code: u8,
+    source: anyhow::Error,
+}
+
+impl CliError {
+    /// Bad local input: exits 2, like clap's own usage errors.
+    fn usage(source: anyhow::Error) -> CliError {
+        CliError {
+            code: EXIT_USAGE,
+            source,
+        }
+    }
+}
+
+/// Anything propagated with `?` from a socket exchange is a daemon or
+/// connection failure; usage errors are tagged explicitly at their source.
+impl From<anyhow::Error> for CliError {
+    fn from(source: anyhow::Error) -> CliError {
+        CliError {
+            code: EXIT_DAEMON,
+            source,
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(&cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("alertu-ctl: {e:#}");
-            ExitCode::FAILURE
+            eprintln!("alertu-ctl: {:#}", e.source);
+            ExitCode::from(e.code)
         }
     }
 }
 
-fn run(cli: &Cli) -> Result<()> {
+fn run(cli: &Cli) -> Result<(), CliError> {
     match &cli.command {
         // Validate the file locally *before* connecting, so a malformed or
         // invalid config reports its own precise error instead of a generic
         // "is alertu-daemon running?" failure when there is nothing to blame
         // on the daemon at all.
         Command::SetConfig { file } => {
-            let cfg = read_config(file)?;
+            let cfg = read_config(file).map_err(CliError::usage)?;
             let mut client = Client::connect(&cli.socket)?;
             client.set_config(cfg)?;
-            print_outcome(&Outcome::Ack, cli.json)
+            print_outcome(&Outcome::Ack, cli.json)?;
+            Ok(())
         }
         // `status --watch` streams instead of producing a single outcome, so
         // it gets its own arm and loop rather than joining the outcome match
         // below.
         Command::Status { watch: true } => {
             let mut client = Client::connect(&cli.socket)?;
-            watch_states(&mut client, cli.json)
+            watch_states(&mut client, cli.json)?;
+            Ok(())
         }
         Command::Arm => with_client(cli, |client| {
             client.arm()?;
@@ -116,10 +154,11 @@ fn run(cli: &Cli) -> Result<()> {
 
 /// Connect, run a single request/response exchange, and print the result.
 /// Shared by every command that needs nothing more than one round trip.
-fn with_client(cli: &Cli, f: impl FnOnce(&mut Client) -> Result<Outcome>) -> Result<()> {
+fn with_client(cli: &Cli, f: impl FnOnce(&mut Client) -> Result<Outcome>) -> Result<(), CliError> {
     let mut client = Client::connect(&cli.socket)?;
     let outcome = f(&mut client)?;
-    print_outcome(&outcome, cli.json)
+    print_outcome(&outcome, cli.json)?;
+    Ok(())
 }
 
 fn print_outcome(outcome: &Outcome, json: bool) -> Result<()> {
@@ -133,9 +172,21 @@ fn watch_states(client: &mut Client, json: bool) -> Result<()> {
     let state = client.subscribe()?;
     println!("{}", render::render(&Outcome::State(state), json)?);
     loop {
-        match client.next_push()? {
+        let push = client.next_push()?;
+        match push {
+            // `--json` is contractually the raw `Response`, so a push keeps its
+            // own `state_changed` tag: a consumer must be able to tell the
+            // initial snapshot from a later transition. The human form is just
+            // the bare state label either way.
             Response::State { state } | Response::StateChanged { state } => {
-                println!("{}", render::render(&Outcome::State(state), json)?);
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&push).context("serializing JSON output")?
+                    );
+                } else {
+                    println!("{}", render::render(&Outcome::State(state), false)?);
+                }
             }
             // Device-list pushes also arrive on a subscribed connection;
             // they are not state changes, so `status` ignores them.
@@ -147,7 +198,7 @@ fn watch_states(client: &mut Client, json: bool) -> Result<()> {
 
 /// Read and validate a config locally, so a typo produces a precise error here
 /// rather than a generic rejection after a round trip.
-fn read_config(file: &PathBuf) -> Result<Config> {
+fn read_config(file: &Path) -> Result<Config> {
     let text = if file.as_os_str() == "-" {
         let mut buf = String::new();
         std::io::stdin()
@@ -230,6 +281,83 @@ mod tests {
     fn set_config_without_a_file_is_a_usage_error() {
         let err = Cli::try_parse_from(["alertu-ctl", "set-config"]).unwrap_err();
         assert_eq!(err.exit_code(), 2);
+    }
+
+    /// A socket path that cannot exist, so no test ever reaches a real daemon.
+    fn dead_socket(dir: &Path) -> PathBuf {
+        dir.join("no-daemon-here.sock")
+    }
+
+    #[test]
+    fn a_bad_config_file_exits_with_the_usage_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist.toml");
+        let cli = Cli::try_parse_from([
+            "alertu-ctl",
+            "-s",
+            dead_socket(dir.path()).to_str().unwrap(),
+            "set-config",
+            missing.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let err = run(&cli).unwrap_err();
+
+        assert_eq!(err.code, EXIT_USAGE, "got: {:#}", err.source);
+    }
+
+    #[test]
+    fn an_invalid_config_exits_with_the_usage_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "toggle_keys = []\n").unwrap();
+        let cli = Cli::try_parse_from([
+            "alertu-ctl",
+            "-s",
+            dead_socket(dir.path()).to_str().unwrap(),
+            "set-config",
+            path.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let err = run(&cli).unwrap_err();
+
+        assert_eq!(err.code, EXIT_USAGE, "got: {:#}", err.source);
+    }
+
+    #[test]
+    fn a_config_that_reaches_a_dead_socket_exits_with_the_daemon_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, toml::to_string_pretty(&Config::default()).unwrap()).unwrap();
+        let cli = Cli::try_parse_from([
+            "alertu-ctl",
+            "-s",
+            dead_socket(dir.path()).to_str().unwrap(),
+            "set-config",
+            path.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let err = run(&cli).unwrap_err();
+
+        assert_eq!(err.code, EXIT_DAEMON, "got: {:#}", err.source);
+    }
+
+    #[test]
+    fn an_unreachable_daemon_exits_with_the_daemon_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = Cli::try_parse_from([
+            "alertu-ctl",
+            "-s",
+            dead_socket(dir.path()).to_str().unwrap(),
+            "status",
+        ])
+        .unwrap();
+
+        let err = run(&cli).unwrap_err();
+
+        assert_eq!(err.code, EXIT_DAEMON, "got: {:#}", err.source);
     }
 
     #[test]
