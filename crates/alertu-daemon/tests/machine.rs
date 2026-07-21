@@ -11,15 +11,18 @@ use alertu_daemon::input::InputSignal;
 use alertu_daemon::machine::{Channels, Control, Machine};
 use alertu_daemon::session::SessionCtl;
 use alertu_daemon::sound::SoundPlayer;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 /// A config that touches nothing real. See the plan's safety constraints:
 /// `session_id` must not name a real logind session or `loginctl lock-session`
-/// would lock the developer's screen, and `camera_device` must not exist or
-/// reaching `Alarm` would trigger the webcam.
-fn test_config() -> Config {
+/// would lock the developer's screen, `camera_device` must not exist or
+/// reaching `Alarm` would trigger the webcam, and `snapshot_dir` must live
+/// under the caller's own tempdir so a real `Alarm` capture attempt (which
+/// `create_dir_all`s it before checking for a capture tool) can't create a
+/// directory outside the test's sandbox.
+fn test_config(tmp: &Path) -> Config {
     Config {
         remote_device: "/nonexistent/remote".to_string(),
         watch_devices: vec!["/nonexistent/watch".to_string()],
@@ -31,6 +34,7 @@ fn test_config() -> Config {
         camera_device: "/nonexistent/video".to_string(),
         session_id: "test-session".to_string(),
         alarm_webhook_url: String::new(),
+        snapshot_dir: tmp.join("snapshots"),
         ..Config::default()
     }
 }
@@ -110,7 +114,7 @@ fn intrusion() -> InputSignal {
 #[tokio::test]
 async fn intrusion_while_armed_escalates_to_the_alarm_then_disarms() {
     let dir = tempfile::tempdir().unwrap();
-    let mut run = spawn_machine(test_config(), dir.path().join("config.toml")).await;
+    let mut run = spawn_machine(test_config(dir.path()), dir.path().join("config.toml")).await;
 
     run.ctrl.send(Control::Arm).await.unwrap();
     expect_state(&mut run.state, GuardState::Armed, Duration::from_secs(5)).await;
@@ -135,7 +139,7 @@ async fn activity_during_the_grace_period_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = Config {
         grace_period_secs: 60,
-        ..test_config()
+        ..test_config(dir.path())
     };
     let mut run = spawn_machine(cfg, dir.path().join("config.toml")).await;
 
@@ -147,4 +151,19 @@ async fn activity_during_the_grace_period_is_ignored() {
     // Give the machine time to (not) react, then assert it stayed put.
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(*run.state.borrow_and_update(), GuardState::Armed);
+
+    // A `watch::Receiver` retains its last published value forever, so the
+    // assertion above would pass identically if the machine task had panicked
+    // or exited right after reaching `Armed`. Prove the event loop is still
+    // alive and processing by round-tripping a command through it.
+    let (cfg_tx, cfg_rx) = oneshot::channel();
+    run.ctrl
+        .send(Control::GetConfig(cfg_tx))
+        .await
+        .expect("machine event loop is dead: ctrl channel closed");
+    let cfg = tokio::time::timeout(Duration::from_secs(5), cfg_rx)
+        .await
+        .expect("machine event loop is dead: GetConfig reply timed out")
+        .expect("machine event loop is dead: GetConfig reply channel dropped");
+    assert_eq!(cfg.grace_period_secs, 60);
 }
