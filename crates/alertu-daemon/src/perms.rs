@@ -11,8 +11,9 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::ffi::CString;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
+use tracing::warn;
 
 /// Process-wide settings resolved from the command line rather than the config
 /// file, so they cannot be changed over the socket they protect.
@@ -98,6 +99,82 @@ pub fn chgrp(path: &Path, gid: u32) -> Result<()> {
 pub fn chmod(path: &Path, mode: u32) -> Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
         .with_context(|| format!("setting mode {mode:o} on {}", path.display()))
+}
+
+/// The mode a managed directory carries *while* the daemon is still putting
+/// things inside it: owner-only, whatever the process umask would have given.
+const DIR_SETUP_MODE: u32 = 0o700;
+
+/// The mode a managed directory ends up at: traversable by the boundary's
+/// group, never by everyone else.
+const DIR_MODE: u32 = 0o750;
+
+/// Create `dir` if needed and apply the group boundary — but only if the
+/// directory is ours to manage. Returns whether the boundary was applied.
+///
+/// Ordering matters: owner-only while we set up, then the group, then widened.
+/// A directory we do not own is left alone with a warning, because chmod sets an
+/// absolute mode and would as easily wreck `/tmp` as tighten our own directory.
+pub fn secure_dir(dir: &Path, privileges: Privileges) -> Result<bool> {
+    if !begin_secure_dir(dir, privileges)? {
+        return Ok(false);
+    }
+    finish_secure_dir(dir)?;
+    Ok(true)
+}
+
+/// The first half of [`secure_dir`]: create the directory, decide whether it is
+/// ours, and — if it is — narrow it to owner-only and apply the group. Returns
+/// whether the directory is ours to manage, i.e. whether the caller must still
+/// call [`finish_secure_dir`].
+///
+/// Split from the widening step for the control socket, which must stay at
+/// `0700` across its `bind` so the socket is never briefly reachable by the
+/// wrong group; everything else wants both halves at once via [`secure_dir`].
+///
+/// The narrow-then-group-then-widen order is not cosmetic. `create_dir_all` and
+/// the first `chmod` are separate syscalls, and in between the directory carries
+/// whatever the umask produced; and until the `chgrp` lands it still carries the
+/// daemon's own primary group, which under a hand-rolled install can be a shared
+/// group like `users`. Widening straight to `0750` would open the directory to
+/// that wrong group for the duration of setup. The group goes on first, the
+/// traversal bit last.
+pub fn begin_secure_dir(dir: &Path, privileges: Privileges) -> Result<bool> {
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("creating directory {}", dir.display()))?;
+
+    // `symlink_metadata`, so a symlink planted where the directory should be is
+    // judged on its own ownership rather than its target's.
+    let meta = std::fs::symlink_metadata(dir)
+        .with_context(|| format!("inspecting directory {}", dir.display()))?;
+    if !meta.is_dir() || meta.uid() != effective_uid() {
+        // Not a failure: an operator-supplied path very often lands in a
+        // directory belonging to somebody else — `/tmp` (`1777`, and chmod-ing
+        // it would destroy the sticky bit machine-wide), a developer's working
+        // directory, `$HOME`, or a `/var/lib/alertu/snapshots` an admin
+        // pre-created as root. Refusing there would make the daemon unrunnable
+        // by hand and would lose alarm evidence outright; the modes we set on
+        // the socket and on each captured file apply regardless of who owns the
+        // directory around them.
+        warn!(
+            dir = %dir.display(),
+            "directory is not owned by this daemon; its permissions cannot be secured. \
+             The modes alertu sets on the socket and on snapshot files still apply."
+        );
+        return Ok(false);
+    }
+
+    chmod(dir, DIR_SETUP_MODE)?;
+    if let Some(gid) = privileges.group_gid {
+        chgrp(dir, gid)?;
+    }
+    Ok(true)
+}
+
+/// The second half of [`secure_dir`]: widen a directory [`begin_secure_dir`]
+/// claimed to its final, group-traversable mode.
+pub fn finish_secure_dir(dir: &Path) -> Result<()> {
+    chmod(dir, DIR_MODE)
 }
 
 #[cfg(test)]
@@ -201,6 +278,75 @@ mod tests {
             err.to_string().contains("/nonexistent/alertu/x"),
             "got: {err}"
         );
+    }
+
+    /// The whole point of `secure_dir`: a directory we own ends up group-
+    /// traversable and not world-anything, created if it was missing.
+    #[test]
+    fn secure_dir_applies_the_boundary_to_a_directory_we_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("snapshots");
+
+        assert!(
+            secure_dir(&target, Privileges::default()).unwrap(),
+            "a directory we just created is ours to manage"
+        );
+
+        let meta = std::fs::metadata(&target).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o750, "dir mode was {mode:o}, expected 0750");
+    }
+
+    /// With an explicit group the directory must carry it, or a group member
+    /// cannot traverse in and the boundary is silently inoperative. Uses a
+    /// supplementary group we already belong to, so this needs no privilege;
+    /// skipped when this account has only one group.
+    #[test]
+    fn secure_dir_applies_the_requested_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("snapshots");
+        let own_gid = std::fs::metadata(dir.path()).unwrap().gid();
+
+        let mut gs = [0 as libc::gid_t; 64];
+        // SAFETY: writing at most gs.len() gid_t values into a buffer we own.
+        let n = unsafe { libc::getgroups(gs.len() as libc::c_int, gs.as_mut_ptr()) };
+        let Some(&other) = gs[..n.max(0) as usize].iter().find(|&&g| g != own_gid) else {
+            return; // only one group here; nothing that would discriminate
+        };
+
+        assert!(secure_dir(
+            &target,
+            Privileges {
+                group_gid: Some(other)
+            }
+        )
+        .unwrap());
+
+        let meta = std::fs::metadata(&target).unwrap();
+        assert_eq!(meta.gid(), other, "the group boundary was not applied");
+        assert_eq!(meta.permissions().mode() & 0o777, 0o750);
+    }
+
+    /// The guard that keeps this from being a vandalism primitive: `/` is
+    /// root's, so `secure_dir` must decline it rather than chmod it. Under an
+    /// euid of 0 every directory is legitimately "ours", so there is nothing to
+    /// assert — and making a directory owned by somebody else needs privilege
+    /// these tests deliberately never take. Skipped rather than faked.
+    #[test]
+    fn secure_dir_declines_a_directory_we_do_not_own() {
+        if effective_uid() == 0 {
+            return;
+        }
+        let root = Path::new("/");
+        let before = std::fs::metadata(root).unwrap().permissions().mode();
+
+        assert!(
+            !secure_dir(root, Privileges::default()).unwrap(),
+            "a directory owned by root must be declined, not chmod-ed"
+        );
+
+        let after = std::fs::metadata(root).unwrap().permissions().mode();
+        assert_eq!(before, after, "the foreign directory's mode was changed");
     }
 
     #[test]

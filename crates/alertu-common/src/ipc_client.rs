@@ -30,6 +30,22 @@ fn is_replay_safe(req: &Request) -> bool {
     }
 }
 
+/// The parenthetical after a failed connect: which hypothesis to check first.
+///
+/// `EACCES` is not "the daemon is down". The socket is `0660` and group-owned,
+/// so a permission error means the daemon is running and this login is simply
+/// not in its group — by far the commonest failure for anyone upgrading from a
+/// world-connectable socket. Sending them to look for a dead daemon wastes the
+/// one diagnostic they get, so name the actual fix instead.
+fn connect_hint(kind: std::io::ErrorKind) -> &'static str {
+    if kind == std::io::ErrorKind::PermissionDenied {
+        "permission denied: your login is probably not in the socket's group — \
+         run `sudo usermod -aG alertu \"$USER\"`, then start a new login session"
+    } else {
+        "is alertu-daemon running?"
+    }
+}
+
 /// A live connection to `alertu-daemon`.
 pub struct Client {
     writer: UnixStream,
@@ -42,11 +58,9 @@ pub struct Client {
 impl Client {
     /// Connect to the daemon's Unix socket.
     pub fn connect(socket: &Path) -> Result<Client> {
-        let writer = UnixStream::connect(socket).with_context(|| {
-            format!(
-                "connecting to {} (is alertu-daemon running?)",
-                socket.display()
-            )
+        let writer = UnixStream::connect(socket).map_err(|e| {
+            let hint = connect_hint(e.kind());
+            anyhow::Error::new(e).context(format!("connecting to {} ({hint})", socket.display()))
         })?;
         let reader = BufReader::new(writer.try_clone().context("cloning socket")?);
         Ok(Client {
@@ -259,6 +273,42 @@ mod tests {
             }
         });
         path
+    }
+
+    /// The socket is `0660`, so "I can't connect" now usually means "I'm not in
+    /// the group", not "the daemon is down". The error has to say so: this is
+    /// the only diagnostic an upgrading user gets.
+    ///
+    /// Not guarded by a uid check (this crate is `#![forbid(unsafe_code)]`, so
+    /// no `geteuid`) but by the outcome: root ignores the mode, the connect
+    /// succeeds, and there is no permission error to assert on — skip rather
+    /// than assert something vacuous.
+    #[test]
+    fn a_permission_denied_connect_names_the_group() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("locked.sock");
+        let _listener = UnixListener::bind(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let Err(err) = Client::connect(&path) else {
+            return; // euid 0, or a filesystem that does not enforce the mode
+        };
+
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("not in the socket's group"),
+            "a permission error must blame the group, got: {text}"
+        );
+        assert!(
+            text.contains("usermod -aG alertu"),
+            "a permission error must name the fix, got: {text}"
+        );
+        assert!(
+            !text.contains("is alertu-daemon running?"),
+            "the daemon is running; that hypothesis only misleads here: {text}"
+        );
     }
 
     #[test]

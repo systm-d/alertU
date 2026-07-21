@@ -152,7 +152,7 @@ process, which under the unit above is `alertu`. That is the whole access
 boundary, so the group matters:
 
 ```sh
-alertu-daemon --socket-group alertu    # put the socket in this group instead
+alertu-daemon --socket-group alertu-users   # put the socket in another group
 ```
 
 `--socket-group` is a command-line flag and not a config field, deliberately:
@@ -213,8 +213,15 @@ Linux with systemd. Works across X11 and Wayland because it only uses
 **Groups.** It is the *daemon's* account that needs `input` (to read
 `/dev/input/event*`, which is `root:input` mode `0660`) and `video` (webcam
 capture). The systemd install above creates that account already in both, so
-your own login needs no group change: the tray, the settings window and
-`alertu-ctl` only speak to the socket and touch no device directly.
+your own login needs neither: the tray, the settings window and `alertu-ctl`
+only speak to the socket and touch no device directly.
+
+Your login does need the socket's group — `alertu` under that install. The
+socket is `0660`, so without it every front end fails to connect:
+
+```sh
+sudo usermod -aG alertu "$USER"   # then start a new session, or use `newgrp alertu`
+```
 
 The exception is running the daemon **by hand** — during development, or to
 identify a new remote — in which case whoever launches it needs `input` too:
@@ -247,6 +254,13 @@ webhook URL, and `SetConfig`, which steers the paths handed to the helper
 programs. Treat group membership as a privilege grant, not a convenience, and
 don't rely on this as a real anti-theft mechanism; there is no binary
 anti-tampering either.
+
+Alarm snapshots sit behind the same boundary: each still is written `0640` in
+the socket's group inside `snapshot_dir` (`/var/lib/alertu/snapshots` by
+default), which the daemon keeps at `0750` when it owns it. That is deliberate
+— a webcam photograph of whoever is at the machine, the owner included, has no
+business being world-readable; a `snapshot_dir` the daemon does not own is left
+as it is with a warning, and the stills' own `0640` still applies.
 
 ## License
 

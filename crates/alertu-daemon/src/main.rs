@@ -68,9 +68,12 @@ fn parse_args() -> Result<Args> {
                 );
                 std::process::exit(0);
             }
-            other => {
-                eprintln!("warning: ignoring unknown argument {other}");
-            }
+            // A hard error for the same reason `value_for` is: a typo like
+            // `--socket-groups alertu` would otherwise warn, exit 0, and run
+            // with the socket on the daemon's own primary group while the
+            // operator believes it is restricted — and under systemd that
+            // warning just scrolls past in the journal.
+            other => return Err(anyhow!("unknown argument {other} (try --help)")),
         }
     }
     Ok(Args {

@@ -369,18 +369,25 @@ fn an_unbindable_socket_aborts_startup_with_a_diagnostic() {
     );
 }
 
-/// A security flag whose value went missing must abort startup, not be quietly
-/// dropped. `--socket-group` with nothing after it used to leave the socket on
-/// the daemon's own group while the operator believed it was restricted; the
-/// same parser also swallowed a following flag as the group name, so
-/// `--socket-group --socket /p` lost the real socket path too.
+/// A security flag the parser could not honour must abort startup, not be
+/// quietly dropped. `--socket-group` with nothing after it used to leave the
+/// socket on the daemon's own group while the operator believed it was
+/// restricted; the same parser also swallowed a following flag as the group
+/// name, so `--socket-group --socket /p` lost the real socket path too. A
+/// misspelt flag is the same failure in a different disguise, and only warned.
 #[test]
 fn a_flag_with_no_value_aborts_startup() {
-    for args in [
-        vec!["--socket-group"],
-        vec!["--socket-group", "--socket", "/tmp/alertu-never-bound.sock"],
-        vec!["--config"],
-        vec!["--socket"],
+    for (args, expected) in [
+        (vec!["--socket-group"], "expects a value"),
+        (
+            vec!["--socket-group", "--socket", "/tmp/alertu-never-bound.sock"],
+            "expects a value",
+        ),
+        (vec!["--config"], "expects a value"),
+        (vec!["--socket"], "expects a value"),
+        // A plausible typo. Warning and continuing here hands the operator a
+        // socket on the daemon's own group while they believe it is restricted.
+        (vec!["--socket-groups", "alertu"], "unknown argument"),
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_alertu-daemon"))
             .args(&args)
@@ -389,11 +396,11 @@ fn a_flag_with_no_value_aborts_startup() {
             .expect("spawning alertu-daemon");
         assert!(
             !out.status.success(),
-            "daemon accepted {args:?}; it must refuse a flag with no value"
+            "daemon accepted {args:?}; it must refuse an argument it cannot honour"
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("expects a value"),
+            stderr.contains(expected),
             "{args:?} did not explain itself; stderr was:\n{stderr}"
         );
     }

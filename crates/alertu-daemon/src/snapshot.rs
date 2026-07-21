@@ -10,26 +10,19 @@ use tracing::{info, warn};
 /// Capture a single still to `snapshot_dir`, named with a timestamp, and return
 /// its path. Prefers `fswebcam`, falling back to `ffmpeg`.
 pub async fn capture(cfg: &Config, privileges: Privileges) -> Result<PathBuf> {
-    tokio::fs::create_dir_all(&cfg.snapshot_dir)
-        .await
-        .with_context(|| format!("creating snapshot dir {}", cfg.snapshot_dir.display()))?;
-
     // Alarm photographs are of whoever is at the machine — including the owner.
     // They get the same group boundary as the control socket, and deliberately
     // not 0644: world-readable webcam stills would be a privacy regression.
     //
-    // Owner-only until the group is right, same order as `ipc::finish_socket`:
-    // `create_dir_all` and the `chmod` below are separate syscalls, and between
-    // them the directory carries whatever group `create_dir_all` gave it — the
-    // daemon's own primary group, which under a hand-rolled install can be a
-    // shared group like `users`. Widening straight to `0750` would open alarm
-    // photographs to that wrong group for the duration of setup. The group
-    // goes on first, the traversal bit last.
-    perms::chmod(&cfg.snapshot_dir, 0o700)?;
-    if let Some(gid) = privileges.group_gid {
-        perms::chgrp(&cfg.snapshot_dir, gid)?;
-    }
-    perms::chmod(&cfg.snapshot_dir, 0o750)?;
+    // `secure_dir` only warns when the directory is somebody else's — an admin
+    // who pre-created /var/lib/alertu/snapshots as root, or any shared location
+    // `snapshot_dir` was pointed at over the socket. Capture proceeds anyway:
+    // the file's own 0640, applied by `secure_captured_file` below, holds
+    // whoever owns the directory, and losing the photograph is the worse
+    // outcome — an alarm with no evidence at all is exactly what this module
+    // exists to prevent.
+    perms::secure_dir(&cfg.snapshot_dir, privileges)
+        .with_context(|| format!("preparing snapshot dir {}", cfg.snapshot_dir.display()))?;
 
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let out = cfg.snapshot_dir.join(format!("alertu-{stamp}.jpg"));
@@ -62,7 +55,11 @@ pub async fn capture(cfg: &Config, privileges: Privileges) -> Result<PathBuf> {
 
     let output = result.context("running capture tool")?;
     if output.status.success() {
-        secure_captured_file(&out, privileges)?;
+        // Named on failure: the `?` here fires before the `info!` below, so
+        // without this context the operator is told "snapshot capture failed"
+        // about a photograph that exists and is sitting there unprotected.
+        secure_captured_file(&out, privileges)
+            .with_context(|| format!("securing snapshot {}", out.display()))?;
         info!(file = %out.display(), "snapshot captured");
         Ok(out)
     } else {
@@ -96,7 +93,10 @@ fn secure_captured_file(out: &Path, privileges: Privileges) -> Result<()> {
 pub fn capture_async(cfg: Config, privileges: Privileges) {
     tokio::spawn(async move {
         if let Err(e) = capture(&cfg, privileges).await {
-            warn!(error = %e, "snapshot capture failed");
+            // `{e:#}` and not `{e}`: the outermost context alone ("securing
+            // snapshot /var/lib/alertu/snapshots/alertu-….jpg") drops the cause
+            // that says what actually went wrong.
+            warn!(error = %format!("{e:#}"), "snapshot capture failed");
         }
     });
 }

@@ -18,6 +18,9 @@ SupplementaryGroups=input video
 RuntimeDirectory=alertu
 RuntimeDirectoryMode=0750
 StateDirectory=alertu
+# Deliberately 0755, not 0750: the snapshot boundary lives one level down, on
+# /var/lib/alertu/snapshots (0750, group-owned), and this directory must stay
+# traversable so a --socket-group member can reach it.
 StateDirectoryMode=0755
 
 # Hardening (relax if it interferes with your setup).

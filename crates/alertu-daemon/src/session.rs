@@ -171,6 +171,11 @@ enum Stopped {
     SessionChanged,
     /// The property stream ended on its own (bus or session gone).
     StreamEnded,
+    /// The receiving end of the lock-state channel is gone: the state machine
+    /// is shutting down, so there is nobody left to observe *for*. Distinct
+    /// from `StreamEnded` because falling back to polling here would spawn
+    /// `loginctl` twice a second for a receiver that no longer exists.
+    MachineGone,
 }
 
 /// How often [`dbus_watch`] re-checks whether the session id it subscribed
@@ -203,6 +208,12 @@ pub async fn watch(session: SessionCtl, tx: mpsc::Sender<bool>, poll_interval: D
             Ok(Stopped::StreamEnded) => {
                 warn!("logind property stream ended; falling back to polling");
                 break;
+            }
+            Ok(Stopped::MachineGone) => {
+                // Not a fallback case: polling would spawn `loginctl` every
+                // `poll_interval` forever with nobody reading the results.
+                debug!("lock-state receiver dropped; stopping the session watch");
+                return;
             }
             Err(e) => {
                 warn!(error = %e, "cannot observe logind over D-Bus; falling back to polling");
@@ -267,7 +278,7 @@ async fn dbus_watch(session: &SessionCtl, tx: &mpsc::Sender<bool>) -> anyhow::Re
                         Ok(locked) => {
                             debug!(locked, "logind reported a lock-state change");
                             if tx.send(locked).await.is_err() {
-                                return Ok(Stopped::StreamEnded); // the machine shut down
+                                return Ok(Stopped::MachineGone);
                             }
                         }
                         Err(e) => warn!(error = %e, "LockedHint was not a boolean"),
