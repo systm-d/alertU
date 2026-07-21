@@ -66,6 +66,15 @@ enum Command {
     },
     /// List the input devices the daemon can see.
     ListDevices,
+    /// Write the default sound files (beep, warning tick, siren) into a directory.
+    GenSounds {
+        /// Destination directory, e.g. /usr/share/sounds/alertu.
+        #[arg(long)]
+        dir: PathBuf,
+        /// Overwrite files that already exist.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// A failure together with the exit code it maps to, so the shell can tell
@@ -108,7 +117,44 @@ fn main() -> ExitCode {
     }
 }
 
+/// The arm/disarm chirp, embedded so `gen-sounds` needs no data files at
+/// runtime. Chosen over a synthesized sine because it simply sounds better.
+const BEEP_WAV: &[u8] = include_bytes!("../../../resources/lock.wav");
+
+/// Write the three default sounds into `dir`.
+///
+/// Refuses to overwrite unless `force`, because the natural destination is a
+/// system directory a user may have customised.
+fn write_sounds(dir: &Path, force: bool) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+
+    let files: [(&str, Vec<u8>); 3] = [
+        ("beep.wav", BEEP_WAV.to_vec()),
+        ("warning.wav", sounds::encode_wav(&sounds::warning_tick())),
+        ("siren.wav", sounds::encode_wav(&sounds::siren())),
+    ];
+
+    for (name, bytes) in &files {
+        let path = dir.join(name);
+        if path.exists() && !force {
+            anyhow::bail!(
+                "{} already exists; pass --force to overwrite",
+                path.display()
+            );
+        }
+        std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(())
+}
+
 fn run(cli: &Cli) -> Result<(), CliError> {
+    // Commands that never touch the socket are handled first.
+    if let Command::GenSounds { dir, force } = &cli.command {
+        write_sounds(dir, *force)?;
+        print_outcome(&Outcome::Ack, cli.json)?;
+        return Ok(());
+    }
+
     match &cli.command {
         // Validate the file locally *before* connecting, so a malformed or
         // invalid config reports its own precise error instead of a generic
@@ -149,6 +195,10 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         }),
         Command::ListDevices => {
             with_client(cli, |client| Ok(Outcome::Devices(client.list_devices()?)))
+        }
+        Command::GenSounds { .. } => {
+            // Already handled in the early-return above.
+            Ok(())
         }
     }
 }
@@ -397,6 +447,63 @@ mod tests {
             err.chain()
                 .any(|c| c.to_string().contains(&*path.display().to_string())),
             "got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn gen_sounds_parses_dir_and_force() {
+        let cli = Cli::try_parse_from(["alertu-ctl", "gen-sounds", "--dir", "/tmp/s"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::GenSounds {
+                dir: PathBuf::from("/tmp/s"),
+                force: false
+            }
+        );
+        let cli = Cli::try_parse_from(["alertu-ctl", "gen-sounds", "--dir", "/tmp/s", "--force"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::GenSounds { force: true, .. }
+        ));
+    }
+
+    #[test]
+    fn gen_sounds_requires_a_dir() {
+        let err = Cli::try_parse_from(["alertu-ctl", "gen-sounds"]).unwrap_err();
+        assert_eq!(err.exit_code(), 2);
+    }
+
+    #[test]
+    fn gen_sounds_writes_three_playable_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sounds(dir.path(), false).unwrap();
+        for name in ["beep.wav", "warning.wav", "siren.wav"] {
+            let bytes = std::fs::read(dir.path().join(name)).unwrap();
+            assert_eq!(&bytes[0..4], b"RIFF", "{name} is not a RIFF file");
+            assert_eq!(&bytes[8..12], b"WAVE", "{name} is not a WAVE file");
+        }
+    }
+
+    #[test]
+    fn gen_sounds_refuses_to_clobber_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("siren.wav"), b"precious").unwrap();
+
+        let err = write_sounds(dir.path(), false).unwrap_err();
+        assert!(
+            err.to_string().contains("siren.wav"),
+            "error should name the file it refused to overwrite, got: {err}"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("siren.wav")).unwrap(),
+            b"precious"
+        );
+
+        write_sounds(dir.path(), true).unwrap();
+        assert_ne!(
+            std::fs::read(dir.path().join("siren.wav")).unwrap(),
+            b"precious"
         );
     }
 }

@@ -4,8 +4,6 @@
 //! computed directly. Ported from `docs/superpowers/gensounds.py`, whose output
 //! was validated on real hardware.
 
-#![allow(dead_code)]
-
 /// Sample rate of every generated file.
 pub const SAMPLE_RATE: u32 = 44_100;
 

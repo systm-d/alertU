@@ -112,6 +112,8 @@ sudo systemctl enable --now alertu-daemon
 install -Dm644 packaging/alertu-gui.service ~/.config/systemd/user/alertu-gui.service
 systemctl --user enable --now alertu-gui
 
+sudo alertu-ctl gen-sounds --dir /usr/share/sounds/alertu
+
 # Application icon and menu entry for the settings window.
 for s in 48 64 128 256 512; do
   install -Dm644 "packaging/icons/hicolor/${s}x${s}/apps/alertu.png" \
@@ -122,7 +124,7 @@ install -Dm644 packaging/alertu-settings.desktop \
 gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 ```
 
-Put three WAV files where the config points (`beep`, `warning`, `siren`), and
+Generate the three sound files the config points at, and
 make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
 `paplay`/`pw-play`/`aplay`/`ffplay`/`play` (audio) are installed.
 
@@ -131,6 +133,7 @@ make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
 `alertu-ctl` does everything the tray does, from a shell or a script:
 
 ```sh
+alertu-ctl gen-sounds --dir /usr/share/sounds/alertu   # write the default sounds
 alertu-ctl status              # Idle | Armed | Triggered | Alarm
 alertu-ctl arm                 # force-arm (locks the session)
 alertu-ctl disarm              # force-disarm (unlocks it)
