@@ -32,4 +32,4 @@ futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 alertu-common = { path = "../alertu-common", features = ["ipc-client"] }
-tempfile = "3"
+tempfile.workspace = true

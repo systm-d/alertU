@@ -20,4 +20,4 @@ directories.workspace = true
 ipc-client = []
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true

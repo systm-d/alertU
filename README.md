@@ -46,15 +46,16 @@ via evdev's `KeyCode` name table.
 
 ## Architecture
 
-Two components talk over a local Unix socket
-(`/run/alertu/alertu.sock`, newline-delimited JSON):
+One privileged daemon owns the state; every front end talks to it over a local
+Unix socket (`/run/alertu/alertu.sock`, newline-delimited JSON):
 
 | Crate | Binary | Role |
 |-------|--------|------|
-| `alertu-common` | — | Shared config, state enum, and IPC protocol. |
+| `alertu-common` | — | Shared config, state enum, and IPC protocol (plus a blocking socket client behind the `ipc-client` feature). |
 | `alertu-daemon` | `alertu-daemon` | Privileged: evdev reading, the state machine, session lock/unlock, audio, snapshots, webhook, `/dev/input` hotplug. |
 | `alertu-gui` | `alertu-gui` | Per-session tray (StatusNotifierItem via `ksni`) reflecting state, with quick device selection and settings in its menu. |
 | `alertu-settings` | `alertu-settings` | Standalone settings window (egui/eframe) for full config editing; launched from the tray's "Open settings…" item. |
+| `alertu-ctl` | `alertu-ctl` | Command line: arm/disarm/toggle, state, config and devices — scriptable, with a `--json` mode. |
 
 The daemon is the only component that touches `/dev/input` and the webcam, so it
 also enumerates devices and reports them to the GUI over IPC — the GUI needs no
@@ -73,18 +74,27 @@ ticks). See `crates/alertu-daemon/src/machine.rs`.
 
 ```sh
 cargo build --release
-# binaries: target/release/alertu-daemon, target/release/alertu-gui
-cargo test --workspace   # unit tests for config, device resolution, key parsing
+# binaries: target/release/{alertu-daemon,alertu-gui,alertu-settings,alertu-ctl}
+cargo test --workspace   # unit tests (config, device resolution, key parsing,
+                         # CLI rendering) plus integration tests that drive a
+                         # real daemon over its socket with a fake `loginctl`
+cargo test --workspace --all-features   # also the feature-gated IPC client tests
 ```
 
-Requires a recent stable Rust toolchain. No system dev libraries are needed:
-the tray uses pure-Rust `zbus` (no `libdbus`), and audio/snapshot/webhook shell
-out to external tools rather than linking C libraries.
+Requires a recent stable Rust toolchain. The daemon, the tray and `alertu-ctl`
+need no system dev libraries: the tray uses pure-Rust `zbus` (no `libdbus`), and
+audio/snapshot/webhook shell out to external tools rather than linking C
+libraries. Only `alertu-settings` pulls in build dependencies, because
+egui/eframe links against X11/Wayland/GL — see the `apt-get install` list in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the exact packages.
+Skip it with `cargo build --release --workspace --exclude alertu-settings` if you
+would rather not install them.
 
 ## Install (systemd)
 
 ```sh
 sudo install -Dm755 target/release/alertu-daemon   /usr/local/bin/alertu-daemon
+sudo install -Dm755 target/release/alertu-ctl      /usr/local/bin/alertu-ctl
 install  -Dm755 target/release/alertu-gui           ~/.local/bin/alertu-gui
 install  -Dm755 target/release/alertu-settings      ~/.local/bin/alertu-settings
 sudo useradd --system --groups input,video alertu   # dedicated daemon user
@@ -99,6 +109,29 @@ systemctl --user enable --now alertu-gui
 Put three WAV files where the config points (`beep`, `warning`, `siren`), and
 make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
 `paplay`/`pw-play`/`aplay`/`ffplay`/`play` (audio) are installed.
+
+## Command line
+
+`alertu-ctl` does everything the tray does, from a shell or a script:
+
+```sh
+alertu-ctl status              # Idle | Armed | Triggered | Alarm
+alertu-ctl arm                 # force-arm (locks the session)
+alertu-ctl disarm              # force-disarm (unlocks it)
+alertu-ctl toggle              # exactly what a remote click does
+alertu-ctl get-config          # the daemon's effective config, as TOML
+alertu-ctl set-config c.toml   # replace it (`-` reads stdin); validated locally first
+alertu-ctl list-devices        # the input devices the daemon can see
+
+alertu-ctl --json status       # {"event":"state","state":"idle"}
+alertu-ctl status --watch      # one line per state change, until interrupted
+alertu-ctl --json status --watch | while read -r line; do ...; done
+```
+
+`--json` prints the daemon's raw protocol response, so a watched transition
+arrives as `{"event":"state_changed","state":"armed"}` and is distinguishable
+from the initial snapshot. `-s/--socket` points at a non-default socket. Exit
+codes: `0` success, `1` daemon or connection error, `2` usage error.
 
 ## Configuration
 

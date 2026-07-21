@@ -39,3 +39,9 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      # `alertu-common`'s `ipc-client` tests are feature-gated; plain
+      # `--workspace` only compiles them because other crates happen to enable
+      # the feature and cargo unifies. Exercise them on their own terms.
+      - name: Test (all features)
+        run: cargo test --workspace --all-features
