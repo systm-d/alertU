@@ -9,6 +9,7 @@ use alertu_common::protocol::InputDeviceInfo;
 use alertu_common::state::GuardState;
 use alertu_daemon::input::InputSignal;
 use alertu_daemon::machine::{Channels, Control, Machine};
+use alertu_daemon::perms::Privileges;
 use alertu_daemon::session::SessionCtl;
 use alertu_daemon::sound::SoundPlayer;
 use std::path::{Path, PathBuf};
@@ -90,6 +91,7 @@ async fn spawn_machine(cfg: Config, cfg_path: PathBuf) -> Running {
         cfg_path,
         session,
         SoundPlayer::new(),
+        Privileges::default(),
         Channels {
             state_tx,
             devices_tx,
@@ -170,4 +172,38 @@ async fn activity_during_the_grace_period_is_ignored() {
         .expect("machine event loop is dead: GetConfig reply timed out")
         .expect("machine event loop is dead: GetConfig reply channel dropped");
     assert_eq!(cfg.grace_period_secs, 60);
+}
+
+/// Reaching `Alarm` must leave a snapshot directory the desktop user can read.
+///
+/// The capture itself fails — `camera_device` points at nothing, deliberately —
+/// but `capture` creates the directory before invoking any tool, so the mode is
+/// observable without going anywhere near a real webcam.
+#[tokio::test]
+async fn the_snapshot_directory_is_group_readable_not_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = test_config(dir.path());
+    // `test_config` already pins `snapshot_dir` inside the temp directory.
+    let snapshots = cfg.snapshot_dir.clone();
+    let mut run = spawn_machine(cfg, dir.path().join("config.toml")).await;
+
+    run.ctrl.send(Control::Arm).await.unwrap();
+    expect_state(&mut run.state, GuardState::Armed, Duration::from_secs(5)).await;
+    run.input.send(intrusion()).await.unwrap();
+    expect_state(&mut run.state, GuardState::Alarm, Duration::from_secs(10)).await;
+
+    // The capture is spawned, so give it a moment to create the directory.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !snapshots.exists() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        snapshots.exists(),
+        "the snapshot directory was never created"
+    );
+
+    let mode = std::fs::metadata(&snapshots).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o750, "snapshot dir mode was {mode:o}, expected 0750");
 }

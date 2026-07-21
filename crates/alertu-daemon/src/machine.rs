@@ -10,6 +10,7 @@
 
 use crate::devices;
 use crate::input::{self, InputSignal};
+use crate::perms::Privileges;
 use crate::session::SessionCtl;
 use crate::snapshot;
 use crate::sound::SoundPlayer;
@@ -49,6 +50,7 @@ pub struct Machine {
 
     session: SessionCtl,
     sound: SoundPlayer,
+    privileges: Privileges,
 
     state_tx: watch::Sender<GuardState>,
     devices_tx: watch::Sender<Vec<InputDeviceInfo>>,
@@ -83,6 +85,7 @@ impl Machine {
         cfg_path: PathBuf,
         session: SessionCtl,
         sound: SoundPlayer,
+        privileges: Privileges,
         ch: Channels,
     ) -> Self {
         Machine {
@@ -91,6 +94,7 @@ impl Machine {
             cfg_path,
             session,
             sound,
+            privileges,
             state_tx: ch.state_tx,
             devices_tx: ch.devices_tx,
             sig_tx: ch.sig_tx,
@@ -234,7 +238,7 @@ impl Machine {
             Effect::PlayBeep => self.sound.play_once(&self.cfg.beep_sound),
             Effect::StartSiren => self.sound.start_siren(&self.cfg.siren_sound),
             Effect::StopSiren => self.sound.stop_siren(),
-            Effect::Snapshot => snapshot::capture_async(self.cfg.clone()),
+            Effect::Snapshot => snapshot::capture_async(self.cfg.clone(), self.privileges),
             Effect::Webhook => webhook::fire(&self.cfg.alarm_webhook_url, GuardState::Alarm),
             Effect::StartGrace => {
                 self.grace_until =

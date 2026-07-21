@@ -136,6 +136,7 @@ async fn main() -> Result<()> {
         args.config.clone(),
         session,
         sound,
+        privileges,
         Channels {
             state_tx,
             devices_tx,

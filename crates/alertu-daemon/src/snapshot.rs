@@ -1,5 +1,6 @@
 //! Webcam capture via an external tool (`fswebcam` or `ffmpeg`).
 
+use crate::perms::{self, Privileges};
 use alertu_common::config::Config;
 use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
@@ -8,10 +9,18 @@ use tracing::{info, warn};
 
 /// Capture a single still to `snapshot_dir`, named with a timestamp, and return
 /// its path. Prefers `fswebcam`, falling back to `ffmpeg`.
-pub async fn capture(cfg: &Config) -> Result<PathBuf> {
+pub async fn capture(cfg: &Config, privileges: Privileges) -> Result<PathBuf> {
     tokio::fs::create_dir_all(&cfg.snapshot_dir)
         .await
         .with_context(|| format!("creating snapshot dir {}", cfg.snapshot_dir.display()))?;
+
+    // Alarm photographs are of whoever is at the machine — including the owner.
+    // They get the same group boundary as the control socket, and deliberately
+    // not 0644: world-readable webcam stills would be a privacy regression.
+    perms::chmod(&cfg.snapshot_dir, 0o750)?;
+    if let Some(gid) = privileges.group_gid {
+        perms::chgrp(&cfg.snapshot_dir, gid)?;
+    }
 
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let out = cfg.snapshot_dir.join(format!("alertu-{stamp}.jpg"));
@@ -44,6 +53,12 @@ pub async fn capture(cfg: &Config) -> Result<PathBuf> {
 
     let output = result.context("running capture tool")?;
     if output.status.success() {
+        // The capture tool created the file under its own umask, so fix the
+        // mode afterwards rather than trying to control the child's umask.
+        perms::chmod(&out, 0o640)?;
+        if let Some(gid) = privileges.group_gid {
+            perms::chgrp(&out, gid)?;
+        }
         info!(file = %out.display(), "snapshot captured");
         Ok(out)
     } else {
@@ -55,9 +70,9 @@ pub async fn capture(cfg: &Config) -> Result<PathBuf> {
 }
 
 /// Spawn a capture in the background so the state machine isn't blocked.
-pub fn capture_async(cfg: Config) {
+pub fn capture_async(cfg: Config, privileges: Privileges) {
     tokio::spawn(async move {
-        if let Err(e) = capture(&cfg).await {
+        if let Err(e) = capture(&cfg, privileges).await {
             warn!(error = %e, "snapshot capture failed");
         }
     });
