@@ -1,13 +1,17 @@
 //! AlertU per-session GUI: a StatusNotifierItem tray reflecting the daemon's
 //! state, with device selection and settings driven through its menu.
 //!
-//! One Unix-socket connection carries everything: outgoing [`Request`]s from
-//! menu callbacks (written by a small writer task) and incoming [`Response`]s
-//! (state pushes, config, device lists) that update the tray via `Handle`.
+//! One Unix-socket connection carries everything: outgoing [`Request`]s that
+//! menu callbacks queue on a channel, and incoming [`Response`]s (state pushes,
+//! config, device lists) that update the tray via `Handle`. Both directions are
+//! driven by the same `select!` inside [`run_session`] — there is no separate
+//! writer task.
 //!
-//! The tray itself is spawned once and outlives every connection: a supervisor
-//! loop below reconnects to the daemon with exponential backoff, so restarting
-//! the daemon never makes the tray icon disappear.
+//! The tray itself is spawned once and outlives every connection: the
+//! supervisor loop in `main` reconnects to the daemon with exponential backoff,
+//! so restarting the daemon never makes the tray icon disappear. While there is
+//! no connection, queued requests are dropped with a warning rather than
+//! replayed later against a state the user can no longer see.
 
 mod tray;
 
@@ -38,6 +42,11 @@ fn socket_path() -> PathBuf {
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 /// Ceiling for the exponential backoff.
 const MAX_BACKOFF: Duration = Duration::from_secs(10);
+
+/// The next retry delay: double, capped.
+fn next_backoff(current: Duration) -> Duration {
+    (current * 2).min(MAX_BACKOFF)
+}
 
 /// What one connection attempt achieved, so the supervisor knows whether to
 /// reset its backoff.
@@ -80,7 +89,7 @@ async fn main() -> Result<()> {
         handle.update(|t| t.connected = false).await;
         warn!(retry_in = ?backoff, "disconnected from daemon");
         tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(MAX_BACKOFF);
+        backoff = next_backoff(backoff);
     }
 }
 
@@ -123,7 +132,11 @@ async fn run_session(
         tokio::select! {
             maybe = req_rx.recv() => {
                 let Some(req) = maybe else {
-                    // Every sender is gone; the tray is shutting down.
+                    // Every sender is gone. Unreachable today: `req_tx` is
+                    // cloned into the tray, which lives as long as the process,
+                    // and "Quit" calls `std::process::exit(0)` outright. Ending
+                    // the session is the honest answer anyway — the supervisor
+                    // will simply try to reconnect.
                     return Ok(outcome);
                 };
                 if let Err(e) = write_request(&mut write_half, &req).await {
@@ -178,5 +191,31 @@ async fn apply_response(handle: &ksni::Handle<AlertuTray>, resp: Response) {
         }
         Response::Ok => {}
         Response::Error { message } => warn!(%message, "daemon reported an error"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Doubling from the initial delay up to the ceiling, which must then be
+    /// sticky: a cap that is only applied once would let the delay keep growing
+    /// past ten seconds and leave the tray offline for minutes.
+    #[test]
+    fn the_backoff_doubles_then_sticks_at_the_ceiling() {
+        let mut d = INITIAL_BACKOFF;
+        assert_eq!(d, Duration::from_millis(250));
+        for expected in [
+            Duration::from_millis(500),
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4),
+            Duration::from_secs(8),
+            MAX_BACKOFF,
+            MAX_BACKOFF,
+        ] {
+            d = next_backoff(d);
+            assert_eq!(d, expected);
+        }
     }
 }

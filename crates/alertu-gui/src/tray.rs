@@ -2,9 +2,12 @@
 //!
 //! The menu doubles as the "settings window": it reflects the current state and
 //! lets the user pick the remote, choose watched devices, and nudge the tunable
-//! delays. Menu callbacks never block — they push a [`Request`] to the writer
-//! task over an unbounded channel and optimistically update the local config so
-//! the menu redraws immediately.
+//! delays. Menu callbacks never block — they queue a [`Request`] on an unbounded
+//! channel, drained by the session loop in `main.rs`, and optimistically update
+//! the local config so the menu redraws immediately.
+//!
+//! While the daemon is unreachable, queued requests are dropped rather than
+//! replayed, so the action items are disabled and the tooltip says so.
 
 use alertu_common::config::{Config, AUTO};
 use alertu_common::protocol::{InputDeviceInfo, Request};
@@ -41,7 +44,7 @@ impl AlertuTray {
         }
     }
 
-    /// Push a request, ignoring send errors (writer task gone → app closing).
+    /// Queue a request, ignoring send errors (receiver gone → app closing).
     fn send(&self, req: Request) {
         let _ = self.req_tx.send(req);
     }
