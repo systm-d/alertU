@@ -336,6 +336,59 @@ so `machine.rs` is untouched.
 `zbus` is a new dependency of `alertu-daemon` (it is already an indirect
 dependency of `alertu-gui` through `ksni`).
 
+### C3. Snapshot permissions
+
+*Added after the first hardware run, which surfaced this.*
+
+Alarm snapshots are written by `fswebcam`/`ffmpeg` as subprocesses, so the files
+inherit the child's umask — observed as `0640` on a stock Fedora. Under the
+systemd unit the daemon runs as `alertu`, so the photos land `alertu:alertu`
+`0640` and **the desktop user cannot read them**. The failure is silent: nothing
+reports it, and the user simply finds no usable evidence after an alarm.
+
+This is the same privilege boundary as C1, so it gets the same answer rather
+than a second one: the snapshot directory becomes `0750` owned by the socket
+group, and each captured file is `chmod`ed to `0640` after a successful capture.
+Members of the group — the desktop user, by C1's setup — can read the photos;
+nobody else can.
+
+**Not `0644`.** These are webcam photographs of whoever is at the machine,
+including the owner. World-readable by default would be a privacy regression
+introduced in the name of convenience. The group boundary already exists; reuse
+it.
+
+The `chmod` happens after the capture rather than by setting the child's umask,
+because the capture is a subprocess: adjusting its umask means `pre_exec` and
+`unsafe`, while a post-capture `set_permissions` on a path the daemon already
+knows is deterministic and needs neither.
+
+### C4. A testable tray session loop
+
+*Added after lot B, whose review established the gap.*
+
+`alertu-gui`'s reconnection logic has no automated coverage beyond the extracted
+backoff function, because `ksni::TrayMethods::spawn()` always registers with a
+`StatusNotifierWatcher` and offers no headless mode. Two behaviours that carry
+real safety content are therefore unverified: that `Subscribe`, `GetConfig` and
+`ListDevices` are replayed **in order on every reconnection**, and that requests
+queued while disconnected are **dropped rather than replayed** — the guard
+against a ten-second-old `Arm` firing against a live alarm.
+
+Decouple `run_session` from `ksni::Handle` behind a two-method trait:
+
+```rust
+/// What a session does to the UI. Implemented by `ksni::Handle<AlertuTray>` in
+/// production and by a recording fake in tests.
+trait TrayView {
+    async fn set_connected(&self, connected: bool);
+    async fn apply(&self, response: Response);
+}
+```
+
+`run_session` then takes `&impl TrayView` and can be driven against a plain
+`tokio::net::UnixListener` with no D-Bus at all. The tray itself is untouched;
+this is a seam, not a redesign.
+
 ---
 
 ## Testing summary
@@ -347,9 +400,11 @@ dependency of `alertu-gui` through `ksni`).
 | Daemon wiring | `blackbox.rs`: arm → lock, external unlock → disarm |
 | Interpreter & timers | `machine.rs`: Armed → Triggered → Alarm |
 | Sound generator | Unit tests: header, length, duration, edge samples |
-| Tray reconnection | Manual verification; backoff logic unit-tested if extracted |
-| Socket hardening | Unit test on group resolution; manual permission check |
+| Tray reconnection | Backoff unit-tested; the session loop covered via `TrayView` (C4) |
+| Socket hardening | Unit test on group resolution; `blackbox.rs` asserts the mode |
 | D-Bus session | Manual verification; fallback path exercised by `blackbox.rs` |
+| Snapshot permissions | Unit test on the chmod helper; `machine.rs` asserts the directory's mode after reaching `Alarm` (no camera involved — capture fails on a non-existent device *after* creating the directory) |
+| Session loop | `TrayView` fake: resync order, stale-request drop, clean exit |
 
 Existing coverage (23 tests, notably the exhaustive `transitions.rs` table)
 stays green throughout.
