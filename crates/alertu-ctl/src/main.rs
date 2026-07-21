@@ -72,50 +72,77 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli) -> Result<()> {
-    let mut client = Client::connect(&cli.socket)?;
-
-    // `status --watch` streams instead of producing a single outcome.
-    if let Command::Status { watch: true } = &cli.command {
-        let state = client.subscribe()?;
-        println!("{}", render::render(&Outcome::State(state), cli.json)?);
-        loop {
-            match client.next_push()? {
-                Response::State { state } | Response::StateChanged { state } => {
-                    println!("{}", render::render(&Outcome::State(state), cli.json)?);
-                }
-                // Device-list pushes also arrive on a subscribed connection;
-                // they are not state changes, so `status` ignores them.
-                Response::Devices { .. } | Response::Config(_) | Response::Ok => {}
-                Response::Error { message } => anyhow::bail!(message),
-            }
+    match &cli.command {
+        // Validate the file locally *before* connecting, so a malformed or
+        // invalid config reports its own precise error instead of a generic
+        // "is alertu-daemon running?" failure when there is nothing to blame
+        // on the daemon at all.
+        Command::SetConfig { file } => {
+            let cfg = read_config(file)?;
+            let mut client = Client::connect(&cli.socket)?;
+            client.set_config(cfg)?;
+            print_outcome(&Outcome::Ack, cli.json)
+        }
+        // `status --watch` streams instead of producing a single outcome, so
+        // it gets its own arm and loop rather than joining the outcome match
+        // below.
+        Command::Status { watch: true } => {
+            let mut client = Client::connect(&cli.socket)?;
+            watch_states(&mut client, cli.json)
+        }
+        Command::Arm => with_client(cli, |client| {
+            client.arm()?;
+            Ok(Outcome::Ack)
+        }),
+        Command::Disarm => with_client(cli, |client| {
+            client.disarm()?;
+            Ok(Outcome::Ack)
+        }),
+        Command::Toggle => with_client(cli, |client| {
+            client.toggle()?;
+            Ok(Outcome::Ack)
+        }),
+        Command::Status { watch: false } => {
+            with_client(cli, |client| Ok(Outcome::State(client.get_state()?)))
+        }
+        Command::GetConfig => with_client(cli, |client| {
+            Ok(Outcome::Config(Box::new(client.get_config()?)))
+        }),
+        Command::ListDevices => {
+            with_client(cli, |client| Ok(Outcome::Devices(client.list_devices()?)))
         }
     }
+}
 
-    let outcome = match &cli.command {
-        Command::Arm => {
-            client.arm()?;
-            Outcome::Ack
-        }
-        Command::Disarm => {
-            client.disarm()?;
-            Outcome::Ack
-        }
-        Command::Toggle => {
-            client.toggle()?;
-            Outcome::Ack
-        }
-        Command::Status { watch: false } => Outcome::State(client.get_state()?),
-        Command::Status { watch: true } => unreachable!("handled above"),
-        Command::GetConfig => Outcome::Config(Box::new(client.get_config()?)),
-        Command::SetConfig { file } => {
-            client.set_config(read_config(file)?)?;
-            Outcome::Ack
-        }
-        Command::ListDevices => Outcome::Devices(client.list_devices()?),
-    };
+/// Connect, run a single request/response exchange, and print the result.
+/// Shared by every command that needs nothing more than one round trip.
+fn with_client(cli: &Cli, f: impl FnOnce(&mut Client) -> Result<Outcome>) -> Result<()> {
+    let mut client = Client::connect(&cli.socket)?;
+    let outcome = f(&mut client)?;
+    print_outcome(&outcome, cli.json)
+}
 
-    println!("{}", render::render(&outcome, cli.json)?);
+fn print_outcome(outcome: &Outcome, json: bool) -> Result<()> {
+    println!("{}", render::render(outcome, json)?);
     Ok(())
+}
+
+/// The `status --watch` loop: print the current state, then one line per
+/// push until the connection errors out or the daemon reports an error.
+fn watch_states(client: &mut Client, json: bool) -> Result<()> {
+    let state = client.subscribe()?;
+    println!("{}", render::render(&Outcome::State(state), json)?);
+    loop {
+        match client.next_push()? {
+            Response::State { state } | Response::StateChanged { state } => {
+                println!("{}", render::render(&Outcome::State(state), json)?);
+            }
+            // Device-list pushes also arrive on a subscribed connection;
+            // they are not state changes, so `status` ignores them.
+            Response::Devices { .. } | Response::Config(_) | Response::Ok => {}
+            Response::Error { message } => anyhow::bail!(message),
+        }
+    }
 }
 
 /// Read and validate a config locally, so a typo produces a precise error here
@@ -203,5 +230,44 @@ mod tests {
     fn set_config_without_a_file_is_a_usage_error() {
         let err = Cli::try_parse_from(["alertu-ctl", "set-config"]).unwrap_err();
         assert_eq!(err.exit_code(), 2);
+    }
+
+    #[test]
+    fn read_config_parses_a_valid_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, toml::to_string_pretty(&Config::default()).unwrap()).unwrap();
+
+        let cfg = read_config(&path).unwrap();
+
+        assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn read_config_rejects_empty_toggle_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "toggle_keys = []\n").unwrap();
+
+        let err = read_config(&path).unwrap_err();
+
+        assert!(
+            err.chain().any(|c| c.to_string().contains("toggle_keys")),
+            "got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn read_config_names_the_path_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.toml");
+
+        let err = read_config(&path).unwrap_err();
+
+        assert!(
+            err.chain()
+                .any(|c| c.to_string().contains(&*path.display().to_string())),
+            "got: {err:#}"
+        );
     }
 }

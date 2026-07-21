@@ -20,8 +20,13 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    /// The protocol response this outcome came from, so `--json` emits exactly
-    /// the daemon's wire format rather than a second, divergent shape.
+    /// The protocol response this outcome came from, so `--json` re-emits the
+    /// daemon's own wire shapes rather than a second, divergent one. This is
+    /// not a verbatim passthrough of every push, though: `status --watch`
+    /// normalizes each `state_changed` push into `Outcome::State` before it
+    /// ever reaches here, so the `state_changed` tag itself never appears in
+    /// `--json` output — every state, initial or pushed, is emitted as
+    /// `{"event":"state",...}`.
     fn to_response(&self) -> Response {
         match self {
             Outcome::State(state) => Response::State { state: *state },
