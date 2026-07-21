@@ -5,6 +5,7 @@
 //! protocol responses so shell scripts can consume them.
 
 mod render;
+mod sounds;
 
 use alertu_common::config::Config;
 use alertu_common::ipc_client::Client;
