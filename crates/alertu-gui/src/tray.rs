@@ -24,6 +24,9 @@ pub struct AlertuTray {
     pub req_tx: UnboundedSender<Request>,
     /// Daemon socket path, forwarded to the settings window when launched.
     pub socket: PathBuf,
+    /// Whether the daemon connection is currently up. Actions that would send a
+    /// request are disabled while it is down, since those requests are dropped.
+    pub connected: bool,
 }
 
 impl AlertuTray {
@@ -34,6 +37,7 @@ impl AlertuTray {
             cfg: None,
             req_tx,
             socket,
+            connected: false,
         }
     }
 
@@ -120,7 +124,11 @@ impl Tray for AlertuTray {
     fn tool_tip(&self) -> ToolTip {
         ToolTip {
             title: "AlertU".into(),
-            description: format!("State: {}", self.state),
+            description: if self.connected {
+                format!("State: {}", self.state)
+            } else {
+                "Daemon offline — reconnecting…".to_string()
+            },
             icon_name: self.icon_name(),
             icon_pixmap: Vec::new(),
         }
@@ -132,7 +140,11 @@ impl Tray for AlertuTray {
         // State header (non-interactive).
         items.push(
             StandardItem {
-                label: format!("AlertU — {}", self.state),
+                label: if self.connected {
+                    format!("AlertU — {}", self.state)
+                } else {
+                    "AlertU — daemon offline".to_string()
+                },
                 enabled: false,
                 ..Default::default()
             }
@@ -148,6 +160,7 @@ impl Tray for AlertuTray {
         items.push(
             StandardItem {
                 label: toggle_label.into(),
+                enabled: self.connected,
                 activate: Box::new(|tray: &mut AlertuTray| tray.send(Request::Toggle)),
                 ..Default::default()
             }
@@ -171,6 +184,7 @@ impl Tray for AlertuTray {
         items.push(
             StandardItem {
                 label: "Refresh devices".into(),
+                enabled: self.connected,
                 activate: Box::new(|tray: &mut AlertuTray| {
                     tray.send(Request::ListDevices);
                     tray.send(Request::GetConfig);
