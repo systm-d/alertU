@@ -369,14 +369,49 @@ fn an_unbindable_socket_aborts_startup_with_a_diagnostic() {
     );
 }
 
+/// A security flag whose value went missing must abort startup, not be quietly
+/// dropped. `--socket-group` with nothing after it used to leave the socket on
+/// the daemon's own group while the operator believed it was restricted; the
+/// same parser also swallowed a following flag as the group name, so
+/// `--socket-group --socket /p` lost the real socket path too.
+#[test]
+fn a_flag_with_no_value_aborts_startup() {
+    for args in [
+        vec!["--socket-group"],
+        vec!["--socket-group", "--socket", "/tmp/alertu-never-bound.sock"],
+        vec!["--config"],
+        vec!["--socket"],
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_alertu-daemon"))
+            .args(&args)
+            .env("RUST_LOG", "warn")
+            .output()
+            .expect("spawning alertu-daemon");
+        assert!(
+            !out.status.success(),
+            "daemon accepted {args:?}; it must refuse a flag with no value"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("expects a value"),
+            "{args:?} did not explain itself; stderr was:\n{stderr}"
+        );
+    }
+}
+
 /// The control socket is a privilege boundary: group-accessible, never
 /// world-accessible. A regression here silently exposes full alarm control
 /// (disarm, read the webhook URL, redirect the helper programs) to every local
 /// account.
+///
+/// The directory is asserted too, and not as an afterthought: the socket's mode
+/// is only half the boundary. `bind` deliberately tightens the parent it owns so
+/// that the window between `bind` and the socket's own `chmod` — during which the
+/// socket carries whatever the umask produced — is not reachable by anyone
+/// outside the group. Without this second assertion that whole mechanism is
+/// untested: turning the directory into `0777` leaves every other test green.
 #[test]
 fn the_control_socket_is_not_world_accessible() {
-    use std::os::unix::fs::PermissionsExt;
-
     let harness = start();
     let mode = std::fs::metadata(&harness.socket)
         .expect("stat the socket")
@@ -384,4 +419,14 @@ fn the_control_socket_is_not_world_accessible() {
         .mode()
         & 0o777;
     assert_eq!(mode, 0o660, "socket mode was {mode:o}, expected 0660");
+
+    let dir_mode = std::fs::metadata(harness.socket.parent().unwrap())
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        dir_mode, 0o750,
+        "socket dir mode was {dir_mode:o}, expected 0750"
+    );
 }

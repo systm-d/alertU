@@ -13,7 +13,7 @@ use alertu_daemon::perms::{self, Privileges};
 use alertu_daemon::session::{self, SessionCtl};
 use alertu_daemon::sound::SoundPlayer;
 use alertu_daemon::{hotplug, ipc};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
@@ -28,28 +28,35 @@ struct Args {
     socket_group: Option<String>,
 }
 
-fn parse_args() -> Args {
+/// The value that must follow `flag`.
+///
+/// A flag whose value is missing is a hard error, never a silent default: every
+/// one of these three changes what the daemon exposes and to whom, so quietly
+/// ignoring `--socket-group` (leaving the socket on the daemon's own group) or
+/// `--config` (running with settings nobody asked for) is exactly the failure
+/// mode worth refusing to start over. A following word that itself looks like a
+/// flag is the same mistake spelled differently — `--socket-group --socket /p`
+/// would otherwise report "no such group: --socket" and drop the real path.
+fn value_for(flag: &str, it: &mut impl Iterator<Item = String>) -> Result<String> {
+    match it.next() {
+        Some(v) if v.starts_with('-') && v.len() > 1 => Err(anyhow!(
+            "{flag} expects a value, but the next argument is another flag: {v}"
+        )),
+        Some(v) => Ok(v),
+        None => Err(anyhow!("{flag} expects a value")),
+    }
+}
+
+fn parse_args() -> Result<Args> {
     let mut config = Config::default_path();
     let mut socket = PathBuf::from(DEFAULT_SOCKET_PATH);
     let mut socket_group = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--config" | "-c" => {
-                if let Some(v) = it.next() {
-                    config = PathBuf::from(v);
-                }
-            }
-            "--socket" | "-s" => {
-                if let Some(v) = it.next() {
-                    socket = PathBuf::from(v);
-                }
-            }
-            "--socket-group" => {
-                if let Some(v) = it.next() {
-                    socket_group = Some(v);
-                }
-            }
+            "--config" | "-c" => config = PathBuf::from(value_for(&arg, &mut it)?),
+            "--socket" | "-s" => socket = PathBuf::from(value_for(&arg, &mut it)?),
+            "--socket-group" => socket_group = Some(value_for(&arg, &mut it)?),
             "--help" | "-h" => {
                 println!(
                     "alertu-daemon [--config <path>] [--socket <path>] [--socket-group <name>]\n\n\
@@ -66,11 +73,11 @@ fn parse_args() -> Args {
             }
         }
     }
-    Args {
+    Ok(Args {
         config,
         socket,
         socket_group,
-    }
+    })
 }
 
 #[tokio::main]
@@ -82,7 +89,7 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let args = parse_args();
+    let args = parse_args().context("parsing command-line arguments")?;
 
     // Resolved up front: an unknown group must abort startup, never silently
     // leave a socket more permissive than the operator asked for.

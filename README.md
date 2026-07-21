@@ -113,6 +113,12 @@ sudo alertu-ctl gen-sounds --dir /usr/share/sounds/alertu
 
 sudo systemctl enable --now alertu-daemon
 
+# The control socket is 0660, owned by the daemon's `alertu` group. Your own
+# login must be in that group or the tray, the settings window and `alertu-ctl`
+# will all fail to connect. Log out and back in afterwards — group membership is
+# only picked up by a new session — or use `newgrp alertu` in the current shell.
+sudo usermod -aG alertu "$USER"
+
 install -Dm644 packaging/alertu-gui.service ~/.config/systemd/user/alertu-gui.service
 systemctl --user enable --now alertu-gui
 
@@ -137,6 +143,33 @@ connect:
 ```sh
 sudo usermod -aG alertu "$USER"   # then start a new session, or use `newgrp alertu`
 ```
+
+### The socket's group
+
+The socket is created `0660` and the daemon takes its group from its own
+process, which under the unit above is `alertu`. That is the whole access
+boundary, so the group matters:
+
+```sh
+alertu-daemon --socket-group alertu    # put the socket in this group instead
+```
+
+`--socket-group` is a command-line flag and not a config field, deliberately:
+it cannot be changed over the very socket it protects. An unknown group name
+aborts startup rather than leaving a socket looser than you asked for, and so
+does the flag with no value after it.
+
+Running the daemon **as root without `--socket-group`** leaves the socket
+`root:root 0660`, which no ordinary account can connect to at all — the tray
+and `alertu-ctl` will simply be locked out. Root invocations need
+`--socket-group <your group>` to be usable.
+
+When the daemon owns the socket's directory (the `RuntimeDirectory=alertu` the
+unit hands it, or one it created itself) it also keeps that directory at `0750`
+with the same group, so the group boundary cannot be walked around. A directory
+it does *not* own — `/tmp`, or your working directory when you run
+`--socket ./x.sock` by hand — is left exactly as it is, with a warning: the
+socket's own `0660` still applies.
 
 ## Command line
 

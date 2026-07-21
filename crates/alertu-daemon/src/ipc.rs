@@ -5,6 +5,7 @@ use crate::perms::{self, Privileges};
 use alertu_common::protocol::{InputDeviceInfo, Request, Response};
 use alertu_common::state::GuardState;
 use anyhow::{Context, Result};
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -27,22 +28,30 @@ use tracing::{debug, info, warn};
 /// privilege grant, not a convenience. Any failure here aborts startup with a
 /// diagnostic.
 pub fn bind(socket_path: &Path, privileges: Privileges) -> Result<UnixListener> {
-    let parent = socket_path.parent();
+    let owned_parent = prepare_parent(socket_path)?;
 
-    if let Some(parent) = parent {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating socket dir {}", parent.display()))?;
-        // Tighten the parent directory *before* binding, not only when an
-        // explicit group is given. `bind` and the `chmod` that follows it below
-        // are two separate syscalls, and between them the socket briefly sits at
-        // whatever mode the process umask produced — under a permissive umask
-        // that is a real window in which a non-group member can connect and
-        // issue commands (e.g. `disarm`). A `0750` parent closes that window
-        // regardless of umask: nothing can traverse into the directory to reach
-        // the socket at all, whatever the socket's own mode happens to be at
-        // that instant.
-        perms::chmod(parent, 0o750)
+    // Owner-only for the whole of setup. `bind` and the `chmod` that follows it
+    // are two separate syscalls, and between them the socket sits at whatever
+    // mode the process umask produced — under a permissive umask that is a real
+    // window in which anyone who can traverse the directory can connect and
+    // issue commands (e.g. `disarm`). `0700` closes it regardless of umask.
+    //
+    // Deliberately *not* `0750` here: until the `chgrp` below lands, the
+    // directory still carries the daemon's own primary group, which under a
+    // hand-rolled install can be a shared group like `users`. Opening the
+    // boundary to the wrong group for the duration of startup is the very race
+    // this is meant to close, and `Restart=on-failure` would hand out repeated
+    // attempts at it. The group is applied first, the traversal bit last.
+    if let Some(parent) = owned_parent {
+        perms::chmod(parent, 0o700)
             .with_context(|| format!("setting mode on socket dir {}", parent.display()))?;
+        // With an explicit group, the parent directory must carry it too, or the
+        // group cannot traverse into the socket and the flag is silently
+        // inoperative. systemd recreates this directory on every start, so the
+        // change does not persist.
+        if let Some(gid) = privileges.group_gid {
+            perms::chgrp(parent, gid)?;
+        }
     }
 
     // Remove a stale socket from a previous run.
@@ -53,21 +62,83 @@ pub fn bind(socket_path: &Path, privileges: Privileges) -> Result<UnixListener> 
 
     let listener = UnixListener::bind(socket_path)
         .with_context(|| format!("binding socket {}", socket_path.display()))?;
-    perms::chmod(socket_path, 0o660)?;
 
-    // With an explicit group, the parent directory must carry it too, or the
-    // group cannot traverse into the socket and the flag is silently
-    // inoperative. systemd recreates this directory on every start, so the
-    // change does not persist.
-    if let Some(gid) = privileges.group_gid {
-        perms::chgrp(socket_path, gid)?;
-        if let Some(parent) = parent {
-            perms::chgrp(parent, gid)?;
-        }
+    // Past this point a failure has already created a socket file. Unlink it
+    // before propagating, so a daemon that aborts startup never leaves an
+    // inode behind that looks connectable but has nobody listening.
+    if let Err(e) = finish_socket(socket_path, owned_parent, privileges) {
+        let _ = std::fs::remove_file(socket_path);
+        return Err(e);
     }
 
     info!(socket = %socket_path.display(), "IPC listening");
     Ok(listener)
+}
+
+/// Create the socket's parent directory and report it back only if it is one
+/// the daemon may safely re-permission.
+///
+/// `--socket` is an operator-supplied path, and its parent is very often a
+/// directory that belongs to somebody else: `/tmp` (`1777`, and chmod-ing it
+/// would destroy the sticky bit for the whole machine), a developer's working
+/// directory, `$HOME`. `chmod` sets an absolute mode, so applying one blindly
+/// does not "tighten" anything — it would just as happily widen a `0700`
+/// directory. Only a directory owned by our own euid is ours to manage; under
+/// the systemd unit that is exactly the `RuntimeDirectory=alertu` case this
+/// hardening exists for.
+///
+/// Anything else is a warning, not a failure: running the daemon by hand
+/// against a socket in `/tmp` is a normal development and test invocation, and
+/// refusing to start would make it unrunnable there. The socket's own `0660`
+/// still applies in that case.
+fn prepare_parent(socket_path: &Path) -> Result<Option<&Path>> {
+    // `Path::parent` answers `Some("")` for a bare `x.sock`, and `.` for
+    // `./x.sock` — both mean the current working directory, which is the
+    // operator's, not ours. `/` is nobody's to touch either.
+    let Some(parent) = socket_path.parent() else {
+        return Ok(None);
+    };
+    if parent.as_os_str().is_empty() || parent == Path::new(".") || parent == Path::new("/") {
+        return Ok(None);
+    }
+
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("creating socket dir {}", parent.display()))?;
+
+    // `symlink_metadata`, so a symlink planted where the directory should be is
+    // judged on its own ownership rather than its target's.
+    let meta = std::fs::symlink_metadata(parent)
+        .with_context(|| format!("inspecting socket dir {}", parent.display()))?;
+    if meta.is_dir() && meta.uid() == perms::effective_uid() {
+        Ok(Some(parent))
+    } else {
+        warn!(
+            dir = %parent.display(),
+            "socket directory is not owned by this daemon; its permissions cannot be secured. \
+             The socket's own 0660 mode still applies."
+        );
+        Ok(None)
+    }
+}
+
+/// Everything that must succeed after `bind`, kept together so the caller has
+/// one place to unlink the socket on failure.
+fn finish_socket(
+    socket_path: &Path,
+    owned_parent: Option<&Path>,
+    privileges: Privileges,
+) -> Result<()> {
+    perms::chmod(socket_path, 0o660)?;
+    if let Some(gid) = privileges.group_gid {
+        perms::chgrp(socket_path, gid)?;
+    }
+    // Last: the directory is opened to the group only once the socket behind it
+    // is fully configured, and only ever to the group it was chgrp-ed to above.
+    if let Some(parent) = owned_parent {
+        perms::chmod(parent, 0o750)
+            .with_context(|| format!("setting mode on socket dir {}", parent.display()))?;
+    }
+    Ok(())
 }
 
 /// Accept connections on an already-bound listener, until cancelled.

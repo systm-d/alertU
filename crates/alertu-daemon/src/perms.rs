@@ -71,6 +71,20 @@ pub fn resolve_gid(name: &str) -> Result<u32> {
     Ok(grp.gr_gid)
 }
 
+/// The effective uid of this process.
+///
+/// Callers need it to decide whether a directory is theirs to manage before
+/// changing its mode or group: chmod-ing a directory the daemon does not own —
+/// `/tmp`, or a working directory a developer pointed `--socket` into — is
+/// vandalism, not hardening. `geteuid` has no safe wrapper in std, so like the
+/// group lookup above it lives in this module.
+pub fn effective_uid() -> u32 {
+    // SAFETY: `geteuid` takes no arguments and reads no caller memory, so there
+    // are no pointers to get wrong. POSIX gives it no error return: it cannot
+    // fail and always yields a valid uid.
+    unsafe { libc::geteuid() }
+}
+
 /// Set the group owner of `path`, leaving the user owner untouched.
 pub fn chgrp(path: &Path, gid: u32) -> Result<()> {
     // `None` for the uid becomes chown(2)'s `(uid_t)-1` "leave unchanged"
@@ -109,6 +123,18 @@ mod tests {
     #[test]
     fn a_group_name_with_a_nul_byte_is_rejected() {
         assert!(resolve_gid("bad\0name").is_err());
+    }
+
+    /// The uid we report must be the one the filesystem attributes our files
+    /// to, since that is the comparison `ipc::bind` makes to decide whether a
+    /// directory is ours to chmod. A constant, or a `getuid`/`geteuid` mix-up
+    /// under a setuid binary, would fail here.
+    #[test]
+    fn effective_uid_is_the_uid_our_own_files_get() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().uid(), effective_uid());
     }
 
     #[test]
