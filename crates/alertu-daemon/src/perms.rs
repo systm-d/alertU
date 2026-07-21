@@ -1,12 +1,16 @@
 //! Group ownership and file modes for everything the daemon exposes.
 //!
 //! The socket and the snapshot directory share one group boundary rather than
-//! inventing two. This is the only module that touches libc, so the rest of the
-//! daemon stays free of `unsafe`.
+//! inventing two. Resolving a group name to a gid needs `getgrnam_r`, which has
+//! no safe equivalent in std, so this is the only module in the crate — indeed
+//! the only module in the workspace — that touches `unsafe`;
+//! `#![deny(unsafe_code)]` on the crate root makes that a build failure rather
+//! than a convention. Changing ownership and mode go through
+//! `std::os::unix::fs::chown` and `std::fs::set_permissions`, both entirely
+//! safe.
 
 use anyhow::{anyhow, Context, Result};
 use std::ffi::CString;
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -29,6 +33,10 @@ pub fn resolve_gid(name: &str) -> Result<u32> {
     // /etc/group line, and we treat ERANGE as an error rather than growing:
     // a group that large is a misconfiguration, not a case to accommodate.
     let mut buf = vec![0 as libc::c_char; 16 * 1024];
+    // SAFETY: `libc::group` is POD — three raw pointers (`gr_name`, `gr_passwd`,
+    // `gr_mem`) plus a `gid_t` (`gr_gid`) — with no niche or non-null
+    // requirement on any field, so the all-zero bit pattern is a valid value.
+    // `getgrnam_r` below fully populates it before we read from it.
     let mut grp: libc::group = unsafe { std::mem::zeroed() };
     let mut found: *mut libc::group = std::ptr::null_mut();
 
@@ -46,6 +54,14 @@ pub fn resolve_gid(name: &str) -> Result<u32> {
     };
 
     if rc != 0 {
+        // POSIX permits getgrnam_r to report "not found" as a nonzero rc with
+        // one of these errnos, rather than rc == 0 with a NULL `found`. glibc's
+        // `files` backend always does the latter, but sssd and ldap backends
+        // commonly do the former. ERANGE must stay a genuine error below: it
+        // means our buffer was too small, not that the group doesn't exist.
+        if matches!(rc, libc::ENOENT | libc::ESRCH | libc::EBADF | libc::EPERM) {
+            return Err(anyhow!("no such group: {name}"));
+        }
         return Err(std::io::Error::from_raw_os_error(rc))
             .with_context(|| format!("looking up group {name}"));
     }
@@ -57,17 +73,11 @@ pub fn resolve_gid(name: &str) -> Result<u32> {
 
 /// Set the group owner of `path`, leaving the user owner untouched.
 pub fn chgrp(path: &Path, gid: u32) -> Result<()> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .with_context(|| format!("path {} contains a NUL byte", path.display()))?;
-
-    // SAFETY: `c_path` is a valid NUL-terminated path. `uid_t::MAX` is the
-    // documented "leave unchanged" sentinel for chown(2).
-    let rc = unsafe { libc::chown(c_path.as_ptr(), u32::MAX, gid) };
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("setting group {gid} on {}", path.display()));
-    }
-    Ok(())
+    // `None` for the uid becomes chown(2)'s `(uid_t)-1` "leave unchanged"
+    // sentinel; std performs the same call this module used to make via
+    // `libc::chown` directly, without needing `unsafe` here.
+    std::os::unix::fs::chown(path, None, Some(gid))
+        .with_context(|| format!("setting group {gid} on {}", path.display()))
 }
 
 /// Set the mode of `path`.
@@ -126,6 +136,45 @@ mod tests {
         let after = std::fs::metadata(&file).unwrap();
         assert_eq!(after.gid(), own_gid);
         assert_eq!(after.uid(), before.uid(), "chgrp must not touch the owner");
+    }
+
+    /// The same-group case above would still pass a `chgrp` that is a no-op, or
+    /// one with its uid/gid arguments swapped (indistinguishable from a no-op
+    /// whenever uid == gid, which is the common user-private-group default).
+    /// Actually changing to a *different*, supplementary group we belong to is
+    /// the discriminating case; `getgroups(2)` needs no privilege to read.
+    /// Guarded so this never requires membership in more than one group, and
+    /// never requires root.
+    #[test]
+    fn chgrp_to_a_different_supplementary_group_actually_changes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f");
+        std::fs::write(&file, b"x").unwrap();
+
+        let before = std::fs::metadata(&file).unwrap();
+        let own_gid = before.gid();
+
+        let mut gs = [0 as libc::gid_t; 64];
+        // SAFETY: writing at most gs.len() gid_t values into a buffer we own.
+        let n = unsafe { libc::getgroups(gs.len() as libc::c_int, gs.as_mut_ptr()) };
+        if let Some(&other) = gs[..n.max(0) as usize].iter().find(|&&g| g != own_gid) {
+            chgrp(&file, other).unwrap();
+            let after = std::fs::metadata(&file).unwrap();
+            assert_eq!(after.gid(), other, "chgrp must change the group");
+            assert_eq!(after.uid(), before.uid(), "chgrp must not touch the owner");
+        }
+        // Else: this user belongs to only one group on this machine, so there is
+        // no second group to discriminate against without root. Nothing to
+        // assert in that case.
+    }
+
+    #[test]
+    fn chgrp_on_a_missing_path_names_the_path() {
+        let err = chgrp(std::path::Path::new("/nonexistent/alertu/x"), 0).unwrap_err();
+        assert!(
+            err.to_string().contains("/nonexistent/alertu/x"),
+            "got: {err}"
+        );
     }
 
     #[test]

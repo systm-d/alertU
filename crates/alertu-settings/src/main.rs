@@ -6,6 +6,8 @@
 //! result back with `SetConfig`. Launched standalone or from the tray's
 //! "Open settings…" item.
 
+#![forbid(unsafe_code)]
+
 use alertu_common::config::{Config, AUTO};
 use alertu_common::ipc_client::Client;
 use alertu_common::protocol::{InputDeviceInfo, DEFAULT_SOCKET_PATH};

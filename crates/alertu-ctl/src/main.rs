@@ -4,6 +4,8 @@
 //! the settings window can do, plus a `--json` mode that emits the raw
 //! protocol responses so shell scripts can consume them.
 
+#![forbid(unsafe_code)]
+
 mod render;
 mod sounds;
 

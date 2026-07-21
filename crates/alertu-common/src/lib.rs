@@ -1,5 +1,7 @@
 //! Types shared by the AlertU daemon and the per-session GUI client.
 
+#![forbid(unsafe_code)]
+
 pub mod config;
 pub mod protocol;
 pub mod state;

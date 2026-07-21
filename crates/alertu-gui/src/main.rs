@@ -13,6 +13,8 @@
 //! no connection, queued requests are dropped with a warning rather than
 //! replayed later against a state the user can no longer see.
 
+#![forbid(unsafe_code)]
+
 mod tray;
 
 use alertu_common::protocol::{Request, Response, DEFAULT_SOCKET_PATH};

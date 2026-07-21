@@ -3,6 +3,8 @@
 //! Wires together config, the evdev readers, the session monitor, the state
 //! machine, and the IPC socket, then runs until `SIGINT`/`SIGTERM`.
 
+#![deny(unsafe_code)]
+
 use alertu_common::config::Config;
 use alertu_common::protocol::DEFAULT_SOCKET_PATH;
 use alertu_common::state::GuardState;

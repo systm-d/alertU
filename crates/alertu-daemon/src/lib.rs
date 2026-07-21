@@ -4,11 +4,14 @@
 //! public so integration tests can drive the state machine in-process, without
 //! evdev devices or any privilege.
 
+#![deny(unsafe_code)]
+
 pub mod devices;
 pub mod hotplug;
 pub mod input;
 pub mod ipc;
 pub mod machine;
+#[allow(unsafe_code)]
 pub mod perms;
 pub mod session;
 pub mod snapshot;
