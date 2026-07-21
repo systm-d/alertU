@@ -124,8 +124,7 @@ install -Dm644 packaging/alertu-settings.desktop \
 gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 ```
 
-Generate the three sound files the config points at, and
-make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
+Make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
 `paplay`/`pw-play`/`aplay`/`ffplay`/`play` (audio) are installed.
 
 ## Command line

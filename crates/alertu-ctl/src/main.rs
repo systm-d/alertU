@@ -134,14 +134,23 @@ fn write_sounds(dir: &Path, force: bool) -> Result<()> {
         ("siren.wav", sounds::encode_wav(&sounds::siren())),
     ];
 
+    // Check every destination before writing any of them, so a refusal
+    // never leaves the directory half-populated: either nothing was written,
+    // or all three were.
+    if !force {
+        for (name, _) in &files {
+            let path = dir.join(name);
+            if path.exists() {
+                anyhow::bail!(
+                    "{} already exists; pass --force to overwrite",
+                    path.display()
+                );
+            }
+        }
+    }
+
     for (name, bytes) in &files {
         let path = dir.join(name);
-        if path.exists() && !force {
-            anyhow::bail!(
-                "{} already exists; pass --force to overwrite",
-                path.display()
-            );
-        }
         std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
     }
     Ok(())
@@ -487,23 +496,52 @@ mod tests {
 
     #[test]
     fn gen_sounds_refuses_to_clobber_without_force() {
+        // warning.wav sits in the middle of the write order (beep, warning,
+        // siren): a check-then-write loop that processes one file at a time
+        // would have already written beep.wav by the time it hits this
+        // conflict, and would never reach siren.wav. Placing the pre-existing
+        // file here is what actually catches that bug — a conflict on the
+        // *first* file wouldn't, since nothing would have been written yet
+        // either way.
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("siren.wav"), b"precious").unwrap();
+        std::fs::write(dir.path().join("warning.wav"), b"precious").unwrap();
 
         let err = write_sounds(dir.path(), false).unwrap_err();
         assert!(
-            err.to_string().contains("siren.wav"),
+            err.to_string().contains("warning.wav"),
             "error should name the file it refused to overwrite, got: {err}"
         );
+
         assert_eq!(
-            std::fs::read(dir.path().join("siren.wav")).unwrap(),
-            b"precious"
+            std::fs::read(dir.path().join("warning.wav")).unwrap(),
+            b"precious",
+            "the pre-existing file must be left untouched"
         );
+        assert!(
+            !dir.path().join("beep.wav").exists(),
+            "a refused run must not create any file, including ones earlier in the write order"
+        );
+        assert!(
+            !dir.path().join("siren.wav").exists(),
+            "a refused run must not create any file, including ones later in the write order"
+        );
+    }
+
+    #[test]
+    fn gen_sounds_force_overwrites_all_three() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["beep.wav", "warning.wav", "siren.wav"] {
+            std::fs::write(dir.path().join(name), b"precious").unwrap();
+        }
 
         write_sounds(dir.path(), true).unwrap();
-        assert_ne!(
-            std::fs::read(dir.path().join("siren.wav")).unwrap(),
-            b"precious"
-        );
+
+        for name in ["beep.wav", "warning.wav", "siren.wav"] {
+            assert_ne!(
+                std::fs::read(dir.path().join(name)).unwrap(),
+                b"precious",
+                "{name} should have been overwritten with --force"
+            );
+        }
     }
 }
