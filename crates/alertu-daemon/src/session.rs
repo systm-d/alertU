@@ -163,6 +163,21 @@ pub async fn monitor(session: SessionCtl, tx: mpsc::Sender<bool>, interval: Dura
     }
 }
 
+/// Why a D-Bus subscription in [`dbus_watch`] stopped.
+enum Stopped {
+    /// `SessionCtl`'s id no longer matches the one this subscription was
+    /// built for (a live reconfigure via `SetConfig`). The caller should
+    /// re-subscribe to the new session rather than fall back to polling.
+    SessionChanged,
+    /// The property stream ended on its own (bus or session gone).
+    StreamEnded,
+}
+
+/// How often [`dbus_watch`] re-checks whether the session id it subscribed
+/// with is still current. Reconfiguration is a rare, operator-driven event,
+/// not a hot path, so this only needs to catch up eventually.
+const RECHECK_INTERVAL: Duration = Duration::from_secs(5);
+
 /// Observe the session's lock state, preferring D-Bus and falling back to
 /// polling.
 ///
@@ -171,21 +186,43 @@ pub async fn monitor(session: SessionCtl, tx: mpsc::Sender<bool>, interval: Dura
 /// observable state change is `PropertiesChanged` on `LockedHint`, which is the
 /// real-time equivalent of what `monitor` polls.
 ///
-/// Any failure — no system bus, an unknown session, a dropped stream — falls
-/// back to the poll loop rather than leaving the daemon blind, because unlock
-/// detection is what disarms the alarm after a password unlock.
+/// `session`'s id can change underneath this call (`SessionCtl::update_from`,
+/// driven by `SetConfig`), so a live D-Bus subscription is torn down and
+/// re-established whenever that happens rather than being left pointed at a
+/// stale session. Any other failure — no system bus, an unknown session, a
+/// dropped stream — falls back to the poll loop rather than leaving the
+/// daemon blind, because unlock detection is what disarms the alarm after a
+/// password unlock.
 pub async fn watch(session: SessionCtl, tx: mpsc::Sender<bool>, poll_interval: Duration) {
-    match dbus_watch(&session.id(), &tx).await {
-        Ok(()) => warn!("logind property stream ended; falling back to polling"),
-        Err(e) => warn!(error = %e, "cannot observe logind over D-Bus; falling back to polling"),
+    loop {
+        match dbus_watch(&session, &tx).await {
+            Ok(Stopped::SessionChanged) => {
+                debug!("session id changed; re-subscribing over D-Bus");
+                continue;
+            }
+            Ok(Stopped::StreamEnded) => {
+                warn!("logind property stream ended; falling back to polling");
+                break;
+            }
+            Err(e) => {
+                warn!(error = %e, "cannot observe logind over D-Bus; falling back to polling");
+                break;
+            }
+        }
     }
     monitor(session, tx, poll_interval).await;
 }
 
-/// Subscribe to `LockedHint` changes. Returns `Ok(())` only when the stream ends.
-async fn dbus_watch(session_id: &str, tx: &mpsc::Sender<bool>) -> anyhow::Result<()> {
+/// Subscribe to `LockedHint` changes on `session`'s current session.
+///
+/// Races the property stream against a periodic re-check of `session.id()`
+/// so a live reconfigure (see [`watch`]) is noticed even though the D-Bus
+/// subscription itself is bound to whatever session id was current when it
+/// was established.
+async fn dbus_watch(session: &SessionCtl, tx: &mpsc::Sender<bool>) -> anyhow::Result<Stopped> {
     use futures_util::StreamExt;
 
+    let session_id = session.id();
     if session_id.is_empty() {
         anyhow::bail!("no session id resolved");
     }
@@ -199,7 +236,8 @@ async fn dbus_watch(session_id: &str, tx: &mpsc::Sender<bool>) -> anyhow::Result
         "org.freedesktop.login1.Manager",
     )
     .await?;
-    let path: zbus::zvariant::OwnedObjectPath = manager.call("GetSession", &(session_id,)).await?;
+    let path: zbus::zvariant::OwnedObjectPath =
+        manager.call("GetSession", &(session_id.as_str(),)).await?;
     debug!(session = %session_id, path = %path.as_str(), "watching logind session over D-Bus");
 
     let props = zbus::fdo::PropertiesProxy::builder(&conn)
@@ -211,22 +249,70 @@ async fn dbus_watch(session_id: &str, tx: &mpsc::Sender<bool>) -> anyhow::Result
     let wanted = zbus::names::InterfaceName::try_from("org.freedesktop.login1.Session")?;
     let mut changes = props.receive_properties_changed().await?;
 
-    while let Some(signal) = changes.next().await {
-        let args = signal.args()?;
-        if args.interface_name != wanted {
-            continue;
-        }
-        if let Some(value) = args.changed_properties.get("LockedHint") {
-            match bool::try_from(value.try_clone()?) {
-                Ok(locked) => {
-                    debug!(locked, "logind reported a lock-state change");
-                    if tx.send(locked).await.is_err() {
-                        return Ok(()); // the machine shut down
+    let mut recheck = tokio::time::interval(RECHECK_INTERVAL);
+    recheck.tick().await; // the first tick fires immediately; skip it
+
+    loop {
+        tokio::select! {
+            signal = changes.next() => {
+                let Some(signal) = signal else {
+                    return Ok(Stopped::StreamEnded);
+                };
+                let args = signal.args()?;
+                if args.interface_name != wanted {
+                    continue;
+                }
+                if let Some(value) = args.changed_properties.get("LockedHint") {
+                    match bool::try_from(value.try_clone()?) {
+                        Ok(locked) => {
+                            debug!(locked, "logind reported a lock-state change");
+                            if tx.send(locked).await.is_err() {
+                                return Ok(Stopped::StreamEnded); // the machine shut down
+                            }
+                        }
+                        Err(e) => warn!(error = %e, "LockedHint was not a boolean"),
                     }
                 }
-                Err(e) => warn!(error = %e, "LockedHint was not a boolean"),
+            }
+            _ = recheck.tick() => {
+                if session_changed(&session_id, session) {
+                    return Ok(Stopped::SessionChanged);
+                }
             }
         }
     }
-    Ok(())
+}
+
+/// True when `session`'s current id no longer matches `subscribed_id`.
+///
+/// This is the pure comparison behind `dbus_watch`'s periodic re-check;
+/// pulled out on its own so it can be unit-tested without a live D-Bus
+/// session.
+fn session_changed(subscribed_id: &str, session: &SessionCtl) -> bool {
+    session.id() != subscribed_id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctl(id: &str) -> SessionCtl {
+        SessionCtl {
+            id: Arc::new(Mutex::new(id.to_string())),
+        }
+    }
+
+    #[test]
+    fn session_changed_is_false_while_the_id_is_unchanged() {
+        let session = ctl("3");
+        assert!(!session_changed("3", &session));
+    }
+
+    #[test]
+    fn session_changed_is_true_after_a_live_reconfigure() {
+        let session = ctl("3");
+        *session.id.lock().unwrap() = "7".to_string();
+        assert!(session_changed("3", &session));
+        assert!(!session_changed("7", &session));
+    }
 }
