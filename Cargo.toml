@@ -26,6 +26,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 directories = "5"
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
+libc = "0.2"
 
 [profile.release]
 lto = "thin"

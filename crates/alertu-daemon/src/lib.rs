@@ -9,6 +9,7 @@ pub mod hotplug;
 pub mod input;
 pub mod ipc;
 pub mod machine;
+pub mod perms;
 pub mod session;
 pub mod snapshot;
 pub mod sound;

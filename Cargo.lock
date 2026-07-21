@@ -171,6 +171,7 @@ dependencies = [
  "evdev",
  "futures-util",
  "inotify",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
