@@ -53,7 +53,8 @@ Two components talk over a local Unix socket
 |-------|--------|------|
 | `alertu-common` | — | Shared config, state enum, and IPC protocol. |
 | `alertu-daemon` | `alertu-daemon` | Privileged: evdev reading, the state machine, session lock/unlock, audio, snapshots, webhook, `/dev/input` hotplug. |
-| `alertu-gui` | `alertu-gui` | Per-session tray (StatusNotifierItem via `ksni`) reflecting state, with device selection and settings in its menu. |
+| `alertu-gui` | `alertu-gui` | Per-session tray (StatusNotifierItem via `ksni`) reflecting state, with quick device selection and settings in its menu. |
+| `alertu-settings` | `alertu-settings` | Standalone settings window (egui/eframe) for full config editing; launched from the tray's "Open settings…" item. |
 
 The daemon is the only component that touches `/dev/input` and the webcam, so it
 also enumerates devices and reports them to the GUI over IPC — the GUI needs no
@@ -83,8 +84,9 @@ out to external tools rather than linking C libraries.
 ## Install (systemd)
 
 ```sh
-sudo install -Dm755 target/release/alertu-daemon /usr/local/bin/alertu-daemon
-install  -Dm755 target/release/alertu-gui        ~/.local/bin/alertu-gui
+sudo install -Dm755 target/release/alertu-daemon   /usr/local/bin/alertu-daemon
+install  -Dm755 target/release/alertu-gui           ~/.local/bin/alertu-gui
+install  -Dm755 target/release/alertu-settings      ~/.local/bin/alertu-settings
 sudo useradd --system --groups input,video alertu   # dedicated daemon user
 sudo install -Dm644 packaging/config.example.toml /etc/alertu/config.toml
 sudo install -Dm644 packaging/alertu-daemon.service /etc/systemd/system/alertu-daemon.service
@@ -119,10 +121,11 @@ must be in the `input` and `video` groups.
   `fswebcam`/`ffmpeg`). This keeps the daemon free of ALSA/PulseAudio and camera
   build dependencies and matches the spec's choice to shell out for capture. The
   `sound` module is a thin wrapper, so swapping in `rodio` later is localized.
-* **Settings live in the tray menu.** Device selection and the tunable delays are
-  driven from the StatusNotifierItem menu (submenus + checkmarks) rather than a
-  separate toolkit window, so the GUI needs no GTK/Qt/X11 dev libraries. A richer
-  standalone settings window could be layered on later.
+* **Two levels of GUI.** The tray (StatusNotifierItem, pure-Rust `zbus`) offers
+  quick device selection and delay tweaks right in its menu — no GTK/Qt needed.
+  For full editing there's a standalone `alertu-settings` window built with
+  egui/eframe (self-contained, no GTK/Qt either), launched from the tray's
+  "Open settings…" item. Both edit the same config live over the socket.
 * **The webhook is the only forward-looking hook** kept in scope (v1 has no full
   mobile pairing), fired via `curl` so there's no HTTP/TLS client dependency.
 

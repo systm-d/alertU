@@ -4,6 +4,7 @@ members = [
     "crates/alertu-common",
     "crates/alertu-daemon",
     "crates/alertu-gui",
+    "crates/alertu-settings",
 ]
 
 [workspace.package]

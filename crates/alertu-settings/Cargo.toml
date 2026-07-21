@@ -1,0 +1,18 @@
+[package]
+name = "alertu-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AlertU settings window (egui): edit config and pick devices via the daemon socket."
+
+[[bin]]
+name = "alertu-settings"
+path = "src/main.rs"
+
+[dependencies]
+alertu-common = { path = "../alertu-common" }
+anyhow.workspace = true
+serde_json.workspace = true
+eframe = "0.29"

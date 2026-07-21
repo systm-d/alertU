@@ -13,6 +13,7 @@ use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::{Category, Icon, MenuItem, Status, ToolTip, Tray};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::warn;
 
 /// The tray model. ksni calls the trait methods on its own task; we mutate it
 /// only through `Handle::update`.
@@ -21,21 +22,37 @@ pub struct AlertuTray {
     pub devices: Vec<InputDeviceInfo>,
     pub cfg: Option<Config>,
     pub req_tx: UnboundedSender<Request>,
+    /// Daemon socket path, forwarded to the settings window when launched.
+    pub socket: PathBuf,
 }
 
 impl AlertuTray {
-    pub fn new(req_tx: UnboundedSender<Request>) -> Self {
+    pub fn new(req_tx: UnboundedSender<Request>, socket: PathBuf) -> Self {
         AlertuTray {
             state: GuardState::Idle,
             devices: Vec::new(),
             cfg: None,
             req_tx,
+            socket,
         }
     }
 
     /// Push a request, ignoring send errors (writer task gone → app closing).
     fn send(&self, req: Request) {
         let _ = self.req_tx.send(req);
+    }
+
+    /// Launch the standalone settings window (`alertu-settings`), pointed at the
+    /// same daemon socket. Found on `PATH`; failure is logged, not fatal.
+    fn launch_settings(&self) {
+        match std::process::Command::new("alertu-settings")
+            .arg("--socket")
+            .arg(&self.socket)
+            .spawn()
+        {
+            Ok(_) => {}
+            Err(e) => warn!(error = %e, "could not launch alertu-settings (is it on PATH?)"),
+        }
     }
 
     /// The path currently configured as the remote (empty when "auto").
@@ -143,6 +160,14 @@ impl Tray for AlertuTray {
         items.push(self.settings_submenu());
         items.push(MenuItem::Separator);
 
+        items.push(
+            StandardItem {
+                label: "Open settings…".into(),
+                activate: Box::new(|tray: &mut AlertuTray| tray.launch_settings()),
+                ..Default::default()
+            }
+            .into(),
+        );
         items.push(
             StandardItem {
                 label: "Refresh devices".into(),

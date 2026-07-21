@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
     let (req_tx, mut req_rx) = mpsc::unbounded_channel::<Request>();
 
     // Bring up the tray.
-    let handle = AlertuTray::new(req_tx.clone())
+    let handle = AlertuTray::new(req_tx.clone(), socket.clone())
         .spawn()
         .await
         .context("spawning system tray (need a StatusNotifierItem host / D-Bus session)")?;
