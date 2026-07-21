@@ -4,9 +4,9 @@
 //! to pushes, so each request has exactly one matching reply on the same
 //! connection, which keeps this dead simple (no async runtime needed).
 
-use alertu_common::config::Config;
-use alertu_common::protocol::{InputDeviceInfo, Request, Response};
-use alertu_common::state::GuardState;
+use crate::config::Config;
+use crate::protocol::{InputDeviceInfo, Request, Response};
+use crate::state::GuardState;
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;

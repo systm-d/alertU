@@ -6,12 +6,10 @@
 //! result back with `SetConfig`. Launched standalone or from the tray's
 //! "Open settings…" item.
 
-mod client;
-
 use alertu_common::config::{Config, AUTO};
+use alertu_common::ipc_client::Client;
 use alertu_common::protocol::{InputDeviceInfo, DEFAULT_SOCKET_PATH};
 use alertu_common::state::GuardState;
-use client::Client;
 use eframe::egui;
 use std::path::PathBuf;
 

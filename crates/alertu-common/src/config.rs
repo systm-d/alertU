@@ -171,15 +171,19 @@ mod tests {
 
     #[test]
     fn explicit_watch_is_not_auto() {
-        let mut cfg = Config::default();
-        cfg.watch_devices = vec!["/dev/input/event2".into()];
+        let cfg = Config {
+            watch_devices: vec!["/dev/input/event2".into()],
+            ..Default::default()
+        };
         assert!(!cfg.watch_is_auto());
     }
 
     #[test]
     fn validate_rejects_empty_toggle_keys() {
-        let mut cfg = Config::default();
-        cfg.toggle_keys.clear();
+        let cfg = Config {
+            toggle_keys: vec![],
+            ..Default::default()
+        };
         assert!(cfg.validate().is_err());
     }
 

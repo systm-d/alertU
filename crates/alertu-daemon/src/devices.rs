@@ -169,12 +169,14 @@ mod tests {
 
     #[test]
     fn explicit_remote_is_never_in_the_watch_list() {
-        let mut cfg = Config::default();
-        cfg.remote_device = "/dev/input/event0".into();
-        cfg.watch_devices = vec![
-            "/dev/input/event0".into(), // remote, must be filtered out
-            "/dev/input/event2".into(),
-        ];
+        let cfg = Config {
+            remote_device: "/dev/input/event0".into(),
+            watch_devices: vec![
+                "/dev/input/event0".into(), // remote, must be filtered out
+                "/dev/input/event2".into(),
+            ],
+            ..Default::default()
+        };
         let r = resolve(&cfg, &sample());
         assert_eq!(r.remote, Some(PathBuf::from("/dev/input/event0")));
         assert_eq!(r.watch, vec![PathBuf::from("/dev/input/event2")]);
@@ -182,8 +184,10 @@ mod tests {
 
     #[test]
     fn unknown_hint_yields_no_remote_but_still_watches() {
-        let mut cfg = Config::default();
-        cfg.remote_name_hint = "Nonexistent Remote".into();
+        let cfg = Config {
+            remote_name_hint: "Nonexistent Remote".into(),
+            ..Default::default()
+        };
         let r = resolve(&cfg, &sample());
         assert_eq!(r.remote, None);
         // With no remote resolved, every non-pointer device is watched.
