@@ -39,7 +39,11 @@ impl Client {
             .write_all(line.as_bytes())
             .context("writing request")?;
         self.writer.flush().context("flushing request")?;
+        self.read_response()
+    }
 
+    /// Read a single newline-delimited response off the socket.
+    fn read_response(&mut self) -> Result<Response> {
         let mut buf = String::new();
         let n = self.reader.read_line(&mut buf).context("reading reply")?;
         if n == 0 {
@@ -78,5 +82,117 @@ impl Client {
             Response::Error { message } => Err(anyhow!(message)),
             other => Err(anyhow!("unexpected reply to SetConfig: {other:?}")),
         }
+    }
+
+    /// Force-arm, locking the session.
+    pub fn arm(&mut self) -> Result<()> {
+        self.expect_ok(&Request::Arm)
+    }
+
+    /// Force-disarm, unlocking the session.
+    pub fn disarm(&mut self) -> Result<()> {
+        self.expect_ok(&Request::Disarm)
+    }
+
+    /// Toggle arm/disarm, exactly as a remote button press would.
+    pub fn toggle(&mut self) -> Result<()> {
+        self.expect_ok(&Request::Toggle)
+    }
+
+    /// Register for asynchronous pushes; returns the state snapshot the daemon
+    /// sends in reply. Follow with [`Client::next_push`].
+    pub fn subscribe(&mut self) -> Result<GuardState> {
+        match self.round_trip(&Request::Subscribe)? {
+            Response::State { state } => Ok(state),
+            Response::Error { message } => Err(anyhow!(message)),
+            other => Err(anyhow!("unexpected reply to Subscribe: {other:?}")),
+        }
+    }
+
+    /// Block until the daemon pushes the next response. Only meaningful after
+    /// [`Client::subscribe`]; on a non-subscribed connection this blocks forever.
+    pub fn next_push(&mut self) -> Result<Response> {
+        self.read_response()
+    }
+
+    /// Round-trip a request whose only successful answer is a bare `Ok`.
+    fn expect_ok(&mut self, req: &Request) -> Result<()> {
+        match self.round_trip(req)? {
+            Response::Ok => Ok(()),
+            Response::Error { message } => Err(anyhow!(message)),
+            other => Err(anyhow!("unexpected reply to {req:?}: {other:?}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+    use std::path::PathBuf;
+    use std::thread;
+
+    /// Start a fake daemon in a background thread: it accepts one connection,
+    /// reads a single request line, then writes every reply in `replies`.
+    /// Returns the socket path.
+    fn fake_daemon(dir: &std::path::Path, replies: &'static [&'static str]) -> PathBuf {
+        let path = dir.join("fake.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            for reply in replies {
+                writeln!(stream, "{reply}").unwrap();
+            }
+            stream.flush().unwrap();
+        });
+        path
+    }
+
+    #[test]
+    fn arm_accepts_an_ok_reply() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_daemon(dir.path(), &[r#"{"event":"ok"}"#]);
+        let mut client = Client::connect(&path).unwrap();
+        client.arm().unwrap();
+    }
+
+    #[test]
+    fn an_error_reply_becomes_an_err() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_daemon(dir.path(), &[r#"{"event":"error","message":"nope"}"#]);
+        let mut client = Client::connect(&path).unwrap();
+        let err = client.toggle().unwrap_err();
+        assert!(err.to_string().contains("nope"), "got: {err}");
+    }
+
+    #[test]
+    fn an_unexpected_reply_becomes_an_err() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_daemon(dir.path(), &[r#"{"event":"state","state":"idle"}"#]);
+        let mut client = Client::connect(&path).unwrap();
+        assert!(client.disarm().is_err());
+    }
+
+    #[test]
+    fn subscribe_returns_the_snapshot_then_streams_pushes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_daemon(
+            dir.path(),
+            &[
+                r#"{"event":"state","state":"idle"}"#,
+                r#"{"event":"state_changed","state":"armed"}"#,
+            ],
+        );
+        let mut client = Client::connect(&path).unwrap();
+        assert_eq!(client.subscribe().unwrap(), GuardState::Idle);
+        assert_eq!(
+            client.next_push().unwrap(),
+            Response::StateChanged {
+                state: GuardState::Armed
+            }
+        );
     }
 }
