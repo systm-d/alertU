@@ -3,24 +3,14 @@
 //! Wires together config, the evdev readers, the session monitor, the state
 //! machine, and the IPC socket, then runs until `SIGINT`/`SIGTERM`.
 
-mod devices;
-mod hotplug;
-mod input;
-mod ipc;
-mod machine;
-mod session;
-mod snapshot;
-mod sound;
-mod transitions;
-mod webhook;
-
 use alertu_common::config::Config;
 use alertu_common::protocol::DEFAULT_SOCKET_PATH;
 use alertu_common::state::GuardState;
+use alertu_daemon::machine::{Channels, Control, Machine};
+use alertu_daemon::session::{self, SessionCtl};
+use alertu_daemon::sound::SoundPlayer;
+use alertu_daemon::{hotplug, ipc};
 use anyhow::{Context, Result};
-use machine::{Channels, Control, Machine};
-use session::SessionCtl;
-use sound::SoundPlayer;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
