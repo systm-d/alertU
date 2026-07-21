@@ -88,10 +88,31 @@ async fn main() -> Result<()> {
             }
             Err(e) => warn!(error = %e, "could not reach the daemon"),
         }
-        handle.update(|t| t.connected = false).await;
+        handle.set_connected(false).await;
         warn!(retry_in = ?backoff, "disconnected from daemon");
         tokio::time::sleep(backoff).await;
         backoff = next_backoff(backoff);
+    }
+}
+
+/// What a session does to the UI.
+///
+/// A seam, not a redesign. It exists so `run_session` can be driven in tests
+/// against a recording fake: `ksni::TrayMethods::spawn` always registers with a
+/// live `StatusNotifierWatcher`, so there is no way to exercise the reconnection
+/// logic through the real tray.
+trait TrayView {
+    async fn set_connected(&self, connected: bool);
+    async fn apply(&self, response: Response);
+}
+
+impl TrayView for ksni::Handle<AlertuTray> {
+    async fn set_connected(&self, connected: bool) {
+        self.update(move |t| t.connected = connected).await;
+    }
+
+    async fn apply(&self, response: Response) {
+        apply_response(self, response).await;
     }
 }
 
@@ -99,7 +120,7 @@ async fn main() -> Result<()> {
 async fn run_session(
     socket: &Path,
     req_rx: &mut mpsc::UnboundedReceiver<Request>,
-    handle: &ksni::Handle<AlertuTray>,
+    view: &impl TrayView,
 ) -> Result<SessionOutcome> {
     let stream = UnixStream::connect(socket)
         .await
@@ -123,7 +144,7 @@ async fn run_session(
         got_response: false,
     };
 
-    handle.update(|t| t.connected = true).await;
+    view.set_connected(true).await;
 
     // Resynchronise: state pushes, the config, and the device list.
     for req in [Request::Subscribe, Request::GetConfig, Request::ListDevices] {
@@ -151,7 +172,7 @@ async fn run_session(
                 Ok(Some(l)) => {
                     outcome.got_response = true;
                     match serde_json::from_str::<Response>(&l) {
-                        Ok(resp) => apply_response(handle, resp).await,
+                        Ok(resp) => view.apply(resp).await,
                         Err(e) => warn!(error = %e, line = %l, "unparseable response"),
                     }
                 }
@@ -199,6 +220,9 @@ async fn apply_response(handle: &ksni::Handle<AlertuTray>, resp: Response) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alertu_common::state::GuardState;
+    use std::sync::Mutex;
+    use tokio::net::UnixListener;
 
     /// Doubling from the initial delay up to the ceiling, which must then be
     /// sticky: a cap that is only applied once would let the delay keep growing
@@ -219,5 +243,133 @@ mod tests {
             d = next_backoff(d);
             assert_eq!(d, expected);
         }
+    }
+
+    /// Records what a session did to the UI, standing in for the real tray.
+    #[derive(Default)]
+    struct RecordingView {
+        connected: Mutex<Vec<bool>>,
+        applied: Mutex<Vec<Response>>,
+    }
+
+    impl TrayView for RecordingView {
+        async fn set_connected(&self, connected: bool) {
+            self.connected.lock().unwrap().push(connected);
+        }
+        async fn apply(&self, response: Response) {
+            self.applied.lock().unwrap().push(response);
+        }
+    }
+
+    /// A fake daemon that reads `expect` request lines, optionally answers, then
+    /// hangs up. Returns the requests it saw.
+    ///
+    /// After `expect` lines, it waits a brief grace period for one more before
+    /// hanging up: the resync requests always reach the socket first, so a
+    /// stray request that a regression replayed anyway would otherwise still
+    /// be sitting unread when the daemon closes the connection, silently
+    /// passing tests that exist specifically to catch that replay.
+    async fn fake_daemon(
+        listener: UnixListener,
+        expect: usize,
+        replies: Vec<&'static str>,
+    ) -> Vec<Request> {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (read_half, mut write_half) = stream.into_split();
+        let mut lines = tokio::io::BufReader::new(read_half).lines();
+
+        let mut seen = Vec::new();
+        for reply in replies {
+            use tokio::io::AsyncWriteExt as _;
+            write_half.write_all(reply.as_bytes()).await.unwrap();
+            write_half.write_all(b"\n").await.unwrap();
+        }
+        while seen.len() < expect {
+            match lines.next_line().await.unwrap() {
+                Some(l) if l.trim().is_empty() => {}
+                Some(l) => seen.push(serde_json::from_str(&l).unwrap()),
+                None => break,
+            }
+        }
+        if let Ok(Ok(Some(l))) =
+            tokio::time::timeout(Duration::from_millis(200), lines.next_line()).await
+        {
+            if let Ok(req) = serde_json::from_str(&l) {
+                seen.push(req);
+            }
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn a_session_resynchronises_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("s.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+
+        let (_tx, mut rx) = mpsc::unbounded_channel::<Request>();
+        let view = RecordingView::default();
+
+        let daemon = tokio::spawn(fake_daemon(listener, 3, vec![]));
+        let session = run_session(&socket, &mut rx, &view);
+        let (seen, outcome) = tokio::join!(daemon, session);
+
+        assert_eq!(
+            seen.unwrap(),
+            vec![Request::Subscribe, Request::GetConfig, Request::ListDevices],
+            "a reconnection must resynchronise state, config and devices, in that order"
+        );
+        assert!(outcome.is_ok());
+        assert_eq!(*view.connected.lock().unwrap(), vec![true]);
+    }
+
+    #[tokio::test]
+    async fn requests_queued_while_disconnected_are_dropped_not_replayed() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("s.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<Request>();
+        // Queued while offline: replaying this against a live alarm is exactly
+        // the hazard the drain exists to prevent.
+        tx.send(Request::Arm).unwrap();
+        tx.send(Request::Toggle).unwrap();
+
+        let view = RecordingView::default();
+        let daemon = tokio::spawn(fake_daemon(listener, 3, vec![]));
+        let session = run_session(&socket, &mut rx, &view);
+        let (seen, _) = tokio::join!(daemon, session);
+
+        let seen = seen.unwrap();
+        assert!(
+            !seen.contains(&Request::Arm) && !seen.contains(&Request::Toggle),
+            "stale requests must never reach the daemon, saw: {seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pushed_response_reaches_the_view() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("s.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+
+        let (_tx, mut rx) = mpsc::unbounded_channel::<Request>();
+        let view = RecordingView::default();
+
+        let daemon = tokio::spawn(fake_daemon(
+            listener,
+            3,
+            vec![r#"{"event":"state_changed","state":"armed"}"#],
+        ));
+        let session = run_session(&socket, &mut rx, &view);
+        let (_, outcome) = tokio::join!(daemon, session);
+
+        assert!(outcome.unwrap().got_response, "a response must be recorded");
+        assert_eq!(
+            *view.applied.lock().unwrap(),
+            vec![Response::StateChanged {
+                state: GuardState::Armed
+            }]
+        );
     }
 }
