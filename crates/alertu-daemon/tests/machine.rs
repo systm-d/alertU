@@ -179,9 +179,33 @@ async fn activity_during_the_grace_period_is_ignored() {
 /// The capture itself fails — `camera_device` points at nothing, deliberately —
 /// but `capture` creates the directory before invoking any tool, so the mode is
 /// observable without going anywhere near a real webcam.
+///
+/// `umask(2)` is process-global and this test harness is multi-threaded, so
+/// setting it in-process would race every other test. Instead this test
+/// re-runs itself in a child process under a fixed `umask 022`: without a fixed
+/// value the assertion below can pass by accident whenever the *ambient* umask
+/// already happens to yield `0750` from a bare `mkdir` (this sandbox's default,
+/// `0027`, is exactly that coincidence — `0777 & ~0027 == 0750`). Same
+/// technique as `alertu-ctl`'s `gen_sounds_writes_readable_files_whatever_the_umask`.
 #[tokio::test]
 async fn the_snapshot_directory_is_group_readable_not_world_readable() {
     use std::os::unix::fs::PermissionsExt;
+
+    const MARKER: &str = "ALERTU_SNAPSHOT_DIR_UMASK_CHILD";
+    if std::env::var_os(MARKER).is_none() {
+        let exe = std::env::current_exe().unwrap();
+        let status = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "umask 022; exec {exe:?} --exact --nocapture \
+                 the_snapshot_directory_is_group_readable_not_world_readable"
+            ))
+            .env(MARKER, "1")
+            .status()
+            .expect("re-running the test binary under a fixed umask");
+        assert!(status.success(), "the run under umask 022 failed");
+        return;
+    }
 
     let dir = tempfile::tempdir().unwrap();
     let cfg = test_config(dir.path());
