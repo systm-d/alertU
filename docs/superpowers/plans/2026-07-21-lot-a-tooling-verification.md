@@ -1174,15 +1174,24 @@ async fn expect_state(
     }
 }
 
-#[tokio::test]
-async fn intrusion_while_armed_escalates_to_the_alarm_then_disarms() {
-    let cfg = test_config();
-    let dir = tempfile::tempdir().unwrap();
+/// Handles for driving a machine that is already running.
+struct Running {
+    ctrl: mpsc::Sender<Control>,
+    /// Injects input signals, standing in for the evdev reader tasks.
+    input: mpsc::Sender<InputSignal>,
+    state: watch::Receiver<GuardState>,
+    /// Held only to keep the lock-state channel open. Dropping it would make
+    /// `lock_rx.recv()` return `None` immediately and forever, and the
+    /// machine's `select!` would spin on it.
+    _lock: mpsc::Sender<bool>,
+}
 
+/// Wire up a `Machine` from `cfg` and spawn it.
+async fn spawn_machine(cfg: Config, cfg_path: PathBuf) -> Running {
     let (sig_tx, sig_rx) = mpsc::channel(64);
-    let (_lock_tx, lock_rx) = mpsc::channel(16);
+    let (lock_tx, lock_rx) = mpsc::channel(16);
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<Control>(32);
-    let (state_tx, mut state_rx) = watch::channel(GuardState::Idle);
+    let (state_tx, state_rx) = watch::channel(GuardState::Idle);
     let (devices_tx, _devices_rx) = watch::channel(Vec::<InputDeviceInfo>::new());
 
     // Our own handle for injecting intrusion; the machine keeps its clone for
@@ -1192,7 +1201,7 @@ async fn intrusion_while_armed_escalates_to_the_alarm_then_disarms() {
     let session = SessionCtl::new(&cfg).await;
     let machine = Machine::new(
         cfg,
-        dir.path().join("config.toml"),
+        cfg_path,
         session,
         SoundPlayer::new(),
         Channels {
@@ -1206,67 +1215,55 @@ async fn intrusion_while_armed_escalates_to_the_alarm_then_disarms() {
     );
     tokio::spawn(machine.run());
 
-    ctrl_tx.send(Control::Arm).await.unwrap();
-    expect_state(&mut state_rx, GuardState::Armed, Duration::from_secs(5)).await;
+    Running {
+        ctrl: ctrl_tx,
+        input: injector,
+        state: state_rx,
+        _lock: lock_tx,
+    }
+}
 
-    injector
-        .send(InputSignal::Activity {
-            source: "test device".to_string(),
-        })
-        .await
-        .unwrap();
-    expect_state(&mut state_rx, GuardState::Triggered, Duration::from_secs(5)).await;
+fn intrusion() -> InputSignal {
+    InputSignal::Activity {
+        source: "test device".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn intrusion_while_armed_escalates_to_the_alarm_then_disarms() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut run = spawn_machine(test_config(), dir.path().join("config.toml")).await;
+
+    run.ctrl.send(Control::Arm).await.unwrap();
+    expect_state(&mut run.state, GuardState::Armed, Duration::from_secs(5)).await;
+
+    run.input.send(intrusion()).await.unwrap();
+    expect_state(&mut run.state, GuardState::Triggered, Duration::from_secs(5)).await;
 
     // `alarm_delay_secs = 1`, so the siren fires about a second later.
-    expect_state(&mut state_rx, GuardState::Alarm, Duration::from_secs(5)).await;
+    expect_state(&mut run.state, GuardState::Alarm, Duration::from_secs(5)).await;
 
-    ctrl_tx.send(Control::Disarm).await.unwrap();
-    expect_state(&mut state_rx, GuardState::Idle, Duration::from_secs(5)).await;
+    run.ctrl.send(Control::Disarm).await.unwrap();
+    expect_state(&mut run.state, GuardState::Idle, Duration::from_secs(5)).await;
 }
 
 #[tokio::test]
 async fn activity_during_the_grace_period_is_ignored() {
-    let mut cfg = test_config();
-    cfg.grace_period_secs = 60;
     let dir = tempfile::tempdir().unwrap();
+    let cfg = Config {
+        grace_period_secs: 60,
+        ..test_config()
+    };
+    let mut run = spawn_machine(cfg, dir.path().join("config.toml")).await;
 
-    let (sig_tx, sig_rx) = mpsc::channel(64);
-    let (_lock_tx, lock_rx) = mpsc::channel(16);
-    let (ctrl_tx, ctrl_rx) = mpsc::channel::<Control>(32);
-    let (state_tx, mut state_rx) = watch::channel(GuardState::Idle);
-    let (devices_tx, _devices_rx) = watch::channel(Vec::<InputDeviceInfo>::new());
+    run.ctrl.send(Control::Arm).await.unwrap();
+    expect_state(&mut run.state, GuardState::Armed, Duration::from_secs(5)).await;
 
-    let injector = sig_tx.clone();
-    let session = SessionCtl::new(&cfg).await;
-    let machine = Machine::new(
-        cfg,
-        dir.path().join("config.toml"),
-        session,
-        SoundPlayer::new(),
-        Channels {
-            state_tx,
-            devices_tx,
-            sig_tx,
-            sig_rx,
-            lock_rx,
-            ctrl_rx,
-        },
-    );
-    tokio::spawn(machine.run());
-
-    ctrl_tx.send(Control::Arm).await.unwrap();
-    expect_state(&mut state_rx, GuardState::Armed, Duration::from_secs(5)).await;
-
-    injector
-        .send(InputSignal::Activity {
-            source: "test device".to_string(),
-        })
-        .await
-        .unwrap();
+    run.input.send(intrusion()).await.unwrap();
 
     // Give the machine time to (not) react, then assert it stayed put.
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(*state_rx.borrow_and_update(), GuardState::Armed);
+    assert_eq!(*run.state.borrow_and_update(), GuardState::Armed);
 }
 ```
 
