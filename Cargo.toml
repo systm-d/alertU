@@ -5,6 +5,7 @@ members = [
     "crates/alertu-daemon",
     "crates/alertu-gui",
     "crates/alertu-settings",
+    "crates/alertu-ctl",
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "process", "signal"] }
 directories = "5"
+clap = { version = "4", features = ["derive"] }
 
 [profile.release]
 lto = "thin"

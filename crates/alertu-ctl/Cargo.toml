@@ -1,0 +1,19 @@
+[package]
+name = "alertu-ctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AlertU command-line control: arm, disarm, status, config and devices over the daemon socket."
+
+[[bin]]
+name = "alertu-ctl"
+path = "src/main.rs"
+
+[dependencies]
+alertu-common = { path = "../alertu-common", features = ["ipc-client"] }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+toml.workspace = true
