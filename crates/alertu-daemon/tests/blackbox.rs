@@ -302,3 +302,69 @@ fn subscribing_after_a_state_change_pushes_nothing_until_the_next_transition() {
         }
     );
 }
+
+/// A daemon that cannot bind its control socket must fail loudly at startup.
+///
+/// Regression test for a silent failure found while running the daemon for real:
+/// `serve` used to bind inside a spawned task whose `Result` was dropped, so an
+/// over-long socket path left the daemon running happily with no IPC server and
+/// not one word in the log — undiagnosable from the outside.
+#[test]
+fn an_unbindable_socket_aborts_startup_with_a_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+
+    let cfg_path = root.join("config.toml");
+    test_config(&root).save(&cfg_path).unwrap();
+
+    // `sun_path` is 108 bytes; pad well past it so the bind cannot succeed.
+    let socket = root.join(format!("{}.sock", "s".repeat(120)));
+    assert!(
+        socket.as_os_str().len() > 108,
+        "test needs a path longer than sun_path"
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_alertu-daemon"))
+        .arg("--config")
+        .arg(&cfg_path)
+        .arg("--socket")
+        .arg(&socket)
+        .env("RUST_LOG", "warn")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawning alertu-daemon");
+
+    // Poll rather than block on `wait`: the bug being guarded against left the
+    // daemon running forever, and a hanging test is a far worse signal than a
+    // failing one.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        match child.try_wait().expect("polling the daemon") {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("daemon was still running 10s after an unbindable socket path");
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+
+    assert!(
+        !status.success(),
+        "daemon exited successfully despite an unbindable socket"
+    );
+    let mut buf = String::new();
+    use std::io::Read as _;
+    child
+        .stderr
+        .take()
+        .expect("piped stderr")
+        .read_to_string(&mut buf)
+        .expect("reading stderr");
+    let stderr = buf;
+    assert!(
+        stderr.contains("control socket"),
+        "startup failure did not name the control socket; stderr was:\n{stderr}"
+    );
+}

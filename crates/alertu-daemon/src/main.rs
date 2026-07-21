@@ -110,14 +110,13 @@ async fn main() -> Result<()> {
     );
     let machine_handle = tokio::spawn(machine.run());
 
-    // IPC server.
+    // IPC server. Binding happens here, not inside the spawned task, so a
+    // failure aborts startup loudly instead of leaving an uncontrollable daemon
+    // running with nothing in the log.
     let socket_path = args.socket.clone();
-    let ipc_handle = tokio::spawn(ipc::serve(
-        socket_path.clone(),
-        state_rx,
-        devices_rx,
-        ctrl_tx,
-    ));
+    let listener = ipc::bind(&socket_path)
+        .with_context(|| format!("binding the control socket {}", socket_path.display()))?;
+    let ipc_handle = tokio::spawn(ipc::serve(listener, state_rx, devices_rx, ctrl_tx));
 
     // Wait for a shutdown signal.
     shutdown_signal().await;

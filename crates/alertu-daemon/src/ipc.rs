@@ -5,40 +5,51 @@ use alertu_common::protocol::{InputDeviceInfo, Request, Response};
 use alertu_common::state::GuardState;
 use anyhow::{Context, Result};
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, info, warn};
 
-/// Bind the socket and accept connections until cancelled.
+/// Bind the control socket, replacing a stale one from a previous run.
+///
+/// This is deliberately separate from [`serve`] and synchronous: binding is the
+/// one part that can fail, and every front end (tray, settings window,
+/// `alertu-ctl`) depends on the socket. Doing it before the daemon claims to be
+/// up means a failure — an over-long path, a bad directory, missing permissions
+/// — aborts startup with a diagnostic instead of leaving a daemon running with
+/// no way to control it.
 ///
 /// The socket is created with `0o666` so a per-session GUI running as the
 /// desktop user can connect to the root-owned daemon. This is a personal
 /// gadget, not a hardened multi-user service (see the README's threat-model
 /// note); tighten via directory permissions if needed.
-pub async fn serve(
-    socket_path: PathBuf,
-    state_rx: watch::Receiver<GuardState>,
-    devices_rx: watch::Receiver<Vec<InputDeviceInfo>>,
-    ctrl_tx: mpsc::Sender<Control>,
-) -> Result<()> {
+pub fn bind(socket_path: &Path) -> Result<UnixListener> {
     if let Some(parent) = socket_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating socket dir {}", parent.display()))?;
     }
     // Remove a stale socket from a previous run.
     if socket_path.exists() {
-        std::fs::remove_file(&socket_path)
+        std::fs::remove_file(socket_path)
             .with_context(|| format!("removing stale socket {}", socket_path.display()))?;
     }
 
-    let listener = UnixListener::bind(&socket_path)
+    let listener = UnixListener::bind(socket_path)
         .with_context(|| format!("binding socket {}", socket_path.display()))?;
-    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o666))
+    std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o666))
         .with_context(|| format!("setting perms on {}", socket_path.display()))?;
     info!(socket = %socket_path.display(), "IPC listening");
+    Ok(listener)
+}
 
+/// Accept connections on an already-bound listener, until cancelled.
+pub async fn serve(
+    listener: UnixListener,
+    state_rx: watch::Receiver<GuardState>,
+    devices_rx: watch::Receiver<Vec<InputDeviceInfo>>,
+    ctrl_tx: mpsc::Sender<Control>,
+) -> Result<()> {
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
