@@ -4,6 +4,7 @@
 //! machine, and the IPC socket, then runs until `SIGINT`/`SIGTERM`.
 
 mod devices;
+mod hotplug;
 mod input;
 mod ipc;
 mod machine;
@@ -80,11 +81,13 @@ async fn main() -> Result<()> {
     cfg.validate().context("validating config")?;
     info!(config = %args.config.display(), "loaded config");
 
-    // Channels: input signals, lock-state changes, control commands, state.
+    // Channels: input signals, lock-state changes, control commands, state,
+    // and the current device list (pushed to subscribers on hotplug).
     let (sig_tx, sig_rx) = mpsc::channel(64);
     let (lock_tx, lock_rx) = mpsc::channel(16);
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<Control>(32);
     let (state_tx, state_rx) = watch::channel(GuardState::Idle);
+    let (devices_tx, devices_rx) = watch::channel(Vec::new());
 
     let session = SessionCtl::new(&cfg).await;
     info!(session = %session.id(), "controlling logind session");
@@ -97,6 +100,9 @@ async fn main() -> Result<()> {
         Duration::from_millis(500),
     ));
 
+    // Device hotplug watcher (re-scans on /dev/input changes).
+    tokio::spawn(hotplug::watch(hotplug::INPUT_DIR, ctrl_tx.clone()));
+
     // State machine.
     let machine = Machine::new(
         cfg,
@@ -105,6 +111,7 @@ async fn main() -> Result<()> {
         sound,
         Channels {
             state_tx,
+            devices_tx,
             sig_tx,
             sig_rx,
             lock_rx,
@@ -115,7 +122,12 @@ async fn main() -> Result<()> {
 
     // IPC server.
     let socket_path = args.socket.clone();
-    let ipc_handle = tokio::spawn(ipc::serve(socket_path.clone(), state_rx, ctrl_tx));
+    let ipc_handle = tokio::spawn(ipc::serve(
+        socket_path.clone(),
+        state_rx,
+        devices_rx,
+        ctrl_tx,
+    ));
 
     // Wait for a shutdown signal.
     shutdown_signal().await;

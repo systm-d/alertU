@@ -16,6 +16,7 @@ use crate::sound::SoundPlayer;
 use crate::transitions::{decide, Effect, Event};
 use crate::webhook;
 use alertu_common::config::Config;
+use alertu_common::protocol::InputDeviceInfo;
 use alertu_common::state::GuardState;
 use evdev::KeyCode;
 use std::path::PathBuf;
@@ -29,11 +30,13 @@ use tracing::{error, info, warn};
 /// Interval between discreet warning ticks during the `Triggered` countdown.
 const WARNING_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Commands the IPC layer sends into the machine.
+/// Commands the IPC layer (and hotplug watcher) send into the machine.
 pub enum Control {
     Toggle,
     Arm,
     Disarm,
+    /// Re-enumerate input devices and re-open readers (device hotplug).
+    Rescan,
     GetConfig(oneshot::Sender<Config>),
     SetConfig(Box<Config>, oneshot::Sender<Result<(), String>>),
 }
@@ -48,6 +51,7 @@ pub struct Machine {
     sound: SoundPlayer,
 
     state_tx: watch::Sender<GuardState>,
+    devices_tx: watch::Sender<Vec<InputDeviceInfo>>,
     sig_tx: mpsc::Sender<InputSignal>,
     sig_rx: mpsc::Receiver<InputSignal>,
     lock_rx: mpsc::Receiver<bool>,
@@ -66,6 +70,7 @@ pub struct Machine {
 /// Wiring handed to [`Machine::new`].
 pub struct Channels {
     pub state_tx: watch::Sender<GuardState>,
+    pub devices_tx: watch::Sender<Vec<InputDeviceInfo>>,
     pub sig_tx: mpsc::Sender<InputSignal>,
     pub sig_rx: mpsc::Receiver<InputSignal>,
     pub lock_rx: mpsc::Receiver<bool>,
@@ -87,6 +92,7 @@ impl Machine {
             session,
             sound,
             state_tx: ch.state_tx,
+            devices_tx: ch.devices_tx,
             sig_tx: ch.sig_tx,
             sig_rx: ch.sig_rx,
             lock_rx: ch.lock_rx,
@@ -170,6 +176,10 @@ impl Machine {
             Control::Toggle => self.apply(Event::Toggle).await,
             Control::Arm => self.apply(Event::ForceArm).await,
             Control::Disarm => self.apply(Event::ForceDisarm).await,
+            Control::Rescan => {
+                info!("device hotplug; rescanning input devices");
+                self.spawn_readers();
+            }
             Control::GetConfig(tx) => {
                 let _ = tx.send(self.cfg.clone());
             }
@@ -274,6 +284,13 @@ impl Machine {
         }
 
         let entries = devices::list();
+
+        // Publish the fresh device list so subscribed GUIs refresh (incl. after
+        // hotplug), even if the connected client never asks again.
+        let _ = self
+            .devices_tx
+            .send(entries.iter().map(|e| e.to_info()).collect());
+
         let resolved = devices::resolve(&self.cfg, &entries);
 
         match &resolved.remote {

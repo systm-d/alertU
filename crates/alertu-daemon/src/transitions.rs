@@ -80,9 +80,10 @@ pub fn decide(state: GuardState, event: Event) -> Option<Transition> {
 
     match (state, event) {
         // --- arming -------------------------------------------------------
-        (Idle, Toggle) | (Idle, ForceArm) => {
-            Some(Transition::new(Armed, vec![LockSession, PlayBeep, StartGrace]))
-        }
+        (Idle, Toggle) | (Idle, ForceArm) => Some(Transition::new(
+            Armed,
+            vec![LockSession, PlayBeep, StartGrace],
+        )),
 
         // --- disarming by remote / force (we unlock the session) ----------
         (s, Toggle) | (s, ForceDisarm) if s.is_active() => Some(Transition::new(
@@ -91,9 +92,10 @@ pub fn decide(state: GuardState, event: Event) -> Option<Transition> {
         )),
 
         // --- disarming by external unlock (session already unlocked) ------
-        (s, SessionUnlocked) if s.is_active() => {
-            Some(Transition::new(Idle, vec![StopSiren, ClearTimers, PlayBeep]))
-        }
+        (s, SessionUnlocked) if s.is_active() => Some(Transition::new(
+            Idle,
+            vec![StopSiren, ClearTimers, PlayBeep],
+        )),
 
         // --- intrusion ----------------------------------------------------
         (Armed, Intrusion) => Some(Transition::new(Triggered, vec![StartCountdown])),

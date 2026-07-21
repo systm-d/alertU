@@ -52,12 +52,14 @@ Two components talk over a local Unix socket
 | Crate | Binary | Role |
 |-------|--------|------|
 | `alertu-common` | — | Shared config, state enum, and IPC protocol. |
-| `alertu-daemon` | `alertu-daemon` | Privileged: evdev reading, the state machine, session lock/unlock, audio, snapshots, webhook. |
+| `alertu-daemon` | `alertu-daemon` | Privileged: evdev reading, the state machine, session lock/unlock, audio, snapshots, webhook, `/dev/input` hotplug. |
 | `alertu-gui` | `alertu-gui` | Per-session tray (StatusNotifierItem via `ksni`) reflecting state, with device selection and settings in its menu. |
 
 The daemon is the only component that touches `/dev/input` and the webcam, so it
 also enumerates devices and reports them to the GUI over IPC — the GUI needs no
-special privileges.
+special privileges. It watches `/dev/input` with inotify, so plugging or
+unplugging a device re-resolves the remote/watch readers and pushes an updated
+device list to the tray automatically (no manual refresh needed).
 
 ### State machine
 

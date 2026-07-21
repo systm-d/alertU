@@ -1,8 +1,7 @@
 //! Unix-socket IPC server: newline-delimited JSON, one connection per GUI.
 
-use crate::devices;
 use crate::machine::Control;
-use alertu_common::protocol::{Request, Response};
+use alertu_common::protocol::{InputDeviceInfo, Request, Response};
 use alertu_common::state::GuardState;
 use anyhow::{Context, Result};
 use std::os::unix::fs::PermissionsExt;
@@ -21,6 +20,7 @@ use tracing::{debug, info, warn};
 pub async fn serve(
     socket_path: PathBuf,
     state_rx: watch::Receiver<GuardState>,
+    devices_rx: watch::Receiver<Vec<InputDeviceInfo>>,
     ctrl_tx: mpsc::Sender<Control>,
 ) -> Result<()> {
     if let Some(parent) = socket_path.parent() {
@@ -43,9 +43,10 @@ pub async fn serve(
         match listener.accept().await {
             Ok((stream, _addr)) => {
                 let state_rx = state_rx.clone();
+                let devices_rx = devices_rx.clone();
                 let ctrl_tx = ctrl_tx.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_conn(stream, state_rx, ctrl_tx).await {
+                    if let Err(e) = handle_conn(stream, state_rx, devices_rx, ctrl_tx).await {
                         debug!(error = %e, "client connection ended");
                     }
                 });
@@ -58,6 +59,7 @@ pub async fn serve(
 async fn handle_conn(
     stream: UnixStream,
     mut state_rx: watch::Receiver<GuardState>,
+    mut devices_rx: watch::Receiver<Vec<InputDeviceInfo>>,
     ctrl_tx: mpsc::Sender<Control>,
 ) -> Result<()> {
     let (read_half, mut write_half) = stream.into_split();
@@ -72,7 +74,7 @@ async fn handle_conn(
                     continue;
                 }
                 let response = match serde_json::from_str::<Request>(&line) {
-                    Ok(req) => dispatch(req, &state_rx, &ctrl_tx, &mut subscribed).await,
+                    Ok(req) => dispatch(req, &state_rx, &devices_rx, &ctrl_tx, &mut subscribed).await,
                     Err(e) => Response::Error { message: format!("bad request: {e}") },
                 };
                 write_response(&mut write_half, &response).await?;
@@ -84,6 +86,13 @@ async fn handle_conn(
                 let state = *state_rx.borrow();
                 write_response(&mut write_half, &Response::StateChanged { state }).await?;
             }
+            changed = devices_rx.changed(), if subscribed => {
+                if changed.is_err() {
+                    break; // sender dropped
+                }
+                let devices = devices_rx.borrow().clone();
+                write_response(&mut write_half, &Response::Devices { devices }).await?;
+            }
         }
     }
     Ok(())
@@ -92,6 +101,7 @@ async fn handle_conn(
 async fn dispatch(
     req: Request,
     state_rx: &watch::Receiver<GuardState>,
+    devices_rx: &watch::Receiver<Vec<InputDeviceInfo>>,
     ctrl_tx: &mpsc::Sender<Control>,
     subscribed: &mut bool,
 ) -> Response {
@@ -129,14 +139,9 @@ async fn dispatch(
                 Err(_) => daemon_gone(),
             }
         }
-        Request::ListDevices => {
-            let devices = tokio::task::spawn_blocking(|| {
-                devices::list().iter().map(|e| e.to_info()).collect()
-            })
-            .await
-            .unwrap_or_default();
-            Response::Devices { devices }
-        }
+        Request::ListDevices => Response::Devices {
+            devices: devices_rx.borrow().clone(),
+        },
     }
 }
 
