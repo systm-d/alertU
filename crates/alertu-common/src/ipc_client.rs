@@ -12,6 +12,24 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
+/// Whether replaying `req` after a dropped connection is safe.
+///
+/// A dropped connection is no evidence about whether the daemon already acted,
+/// so only requests that are idempotent *and* carry no session state may be
+/// replayed. `Subscribe` is excluded because a reopened connection is no longer
+/// subscribed, and `next_push` would then block forever.
+///
+/// Matched exhaustively on purpose: adding a request to the protocol should
+/// force a decision here rather than silently defaulting either way.
+fn is_replay_safe(req: &Request) -> bool {
+    match req {
+        Request::GetConfig | Request::ListDevices | Request::GetState | Request::SetConfig(_) => {
+            true
+        }
+        Request::Arm | Request::Disarm | Request::Toggle | Request::Subscribe => false,
+    }
+}
+
 /// A live connection to `alertu-daemon`.
 pub struct Client {
     writer: UnixStream,
@@ -39,14 +57,15 @@ impl Client {
         })
     }
 
-    /// Reconnect and retry once when a request fails on I/O.
+    /// Reconnect and retry once when a replay-safe request fails.
     ///
-    /// Opt-in, and deliberately not the default: a dropped connection is no
-    /// evidence about whether the daemon acted on the request, so replaying
-    /// `Arm`/`Disarm`/`Toggle` could re-arm an alarm the user just disarmed.
-    /// Enable it only for a caller whose requests are idempotent — the settings
-    /// window, which sends nothing but `GetConfig`, `ListDevices` and
-    /// `SetConfig`.
+    /// Opt-in, and deliberately not the default: reconnecting silently hides a
+    /// daemon restart, which not every caller wants. It is *not* what makes the
+    /// retry safe, though — that is [`is_replay_safe`], which is consulted per
+    /// request, so enabling this can never cause an `Arm` to be replayed.
+    ///
+    /// The only caller today is the settings window, which sends nothing but
+    /// `GetConfig`, `ListDevices` and `SetConfig`.
     pub fn with_reconnect(mut self) -> Self {
         self.reconnect = true;
         self
@@ -61,13 +80,27 @@ impl Client {
     }
 
     /// Send one request and read exactly one reply, retrying once through a
-    /// fresh connection when [`Client::with_reconnect`] is enabled.
+    /// fresh connection when [`Client::with_reconnect`] is enabled *and* the
+    /// request is replay-safe.
+    ///
+    /// Any failure of a replay-safe request may be retried, I/O or not: a
+    /// mangled reply is no more evidence of what the daemon did than a dropped
+    /// connection is, and re-asking a question with no side effects costs
+    /// nothing.
     fn round_trip(&mut self, req: &Request) -> Result<Response> {
         match self.attempt_round_trip(req) {
             Ok(resp) => Ok(resp),
-            Err(e) if self.reconnect => {
+            Err(e) if self.reconnect && is_replay_safe(req) => {
                 self.reopen().context(format!("retrying after: {e}"))?;
-                self.attempt_round_trip(req)
+                // Name both failures: without the first one, the settings
+                // window would report a bare "daemon closed the connection"
+                // with no hint that a reconnection had even been attempted.
+                // `{e:#}` and not `{e}`: the interesting part of the first
+                // failure is usually its cause ("reading reply: daemon closed
+                // the connection"), which the plain Display would drop.
+                self.attempt_round_trip(req).with_context(|| {
+                    format!("failed again after reconnecting (first failure: {e:#})")
+                })
             }
             Err(e) => Err(e),
         }
@@ -194,8 +227,14 @@ mod tests {
     }
 
     /// A fake daemon that serves several connections in turn. Each entry is one
-    /// session's replies; an empty slice means "accept, then hang up without
-    /// answering", which is what a daemon restart looks like to a client.
+    /// session's replies; an empty slice means "take the request, then hang up
+    /// without answering", which is what a daemon restart looks like to a
+    /// client mid-request.
+    ///
+    /// The request is consumed even when there are no replies, so the client's
+    /// write always lands and its read always sees a clean EOF. Closing before
+    /// the write would race, surfacing `Connection reset by peer` instead —
+    /// same outcome, different message, flaky assertions.
     fn fake_daemon_sessions(
         dir: &std::path::Path,
         sessions: &'static [&'static [&'static str]],
@@ -207,12 +246,12 @@ mod tests {
                 let Ok((mut stream, _)) = listener.accept() else {
                     return;
                 };
-                if replies.is_empty() {
-                    continue; // drop the connection unanswered
-                }
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
                 let _ = reader.read_line(&mut line);
+                if replies.is_empty() {
+                    continue; // drop the connection unanswered
+                }
                 for reply in *replies {
                     let _ = writeln!(stream, "{reply}");
                 }
@@ -286,5 +325,104 @@ mod tests {
         client
             .set_config(Config::default())
             .expect("the retry should have reached the second session");
+    }
+
+    /// FIX 3's wording, pinned: when the retry itself fails, the surfaced error
+    /// must still name the original failure, or the settings window reports a
+    /// bare "daemon closed the connection" with no sign a retry happened.
+    #[test]
+    fn with_reconnect_a_failed_retry_names_both_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_daemon_sessions(dir.path(), &[&[], &[]]);
+        let mut client = Client::connect(&path).unwrap().with_reconnect();
+
+        let err = client.set_config(Config::default()).unwrap_err();
+
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("failed again after reconnecting"),
+            "the error should say a retry was attempted, got: {text}"
+        );
+        assert!(
+            text.contains("daemon closed the connection"),
+            "the error should carry the original failure, got: {text}"
+        );
+    }
+
+    /// The safety of the retry lives in `is_replay_safe`, not in a doc comment:
+    /// enabling reconnection must not make a state-changing request replayable.
+    #[test]
+    fn replay_safety_is_decided_per_request() {
+        for req in [
+            Request::GetConfig,
+            Request::ListDevices,
+            Request::GetState,
+            Request::SetConfig(Box::default()),
+        ] {
+            assert!(is_replay_safe(&req), "{req:?} should be replay-safe");
+        }
+        for req in [
+            Request::Arm,
+            Request::Disarm,
+            Request::Toggle,
+            // A reopened connection is not subscribed; retrying would leave
+            // `next_push` blocking forever on a connection nobody feeds.
+            Request::Subscribe,
+        ] {
+            assert!(!is_replay_safe(&req), "{req:?} must never be replayed");
+        }
+    }
+
+    /// A first session that hangs up unanswered, then a second one standing by
+    /// with an answer. Anything the client retries therefore *succeeds* here —
+    /// which is what gives the assertions below teeth: a request that must not
+    /// be replayed can only fail if the gate actually stopped it.
+    const DROP_THEN_OK: &[&[&str]] = &[&[], &[r#"{"event":"ok"}"#]];
+    const DROP_THEN_STATE: &[&[&str]] = &[&[], &[r#"{"event":"state","state":"idle"}"#]];
+
+    fn reconnecting_client(
+        dir: &std::path::Path,
+        sessions: &'static [&'static [&'static str]],
+    ) -> Client {
+        let path = fake_daemon_sessions(dir, sessions);
+        Client::connect(&path).unwrap().with_reconnect()
+    }
+
+    #[test]
+    fn with_reconnect_arm_is_never_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = reconnecting_client(dir.path(), DROP_THEN_OK);
+        assert!(
+            client.arm().is_err(),
+            "a replayed Arm could re-arm an alarm the user just disarmed"
+        );
+    }
+
+    #[test]
+    fn with_reconnect_disarm_is_never_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = reconnecting_client(dir.path(), DROP_THEN_OK);
+        assert!(client.disarm().is_err(), "Disarm must not be replayed");
+    }
+
+    #[test]
+    fn with_reconnect_toggle_is_never_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = reconnecting_client(dir.path(), DROP_THEN_OK);
+        assert!(
+            client.toggle().is_err(),
+            "a replayed Toggle would land on the opposite state"
+        );
+    }
+
+    #[test]
+    fn with_reconnect_subscribe_is_never_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut client = reconnecting_client(dir.path(), DROP_THEN_STATE);
+        assert!(
+            client.subscribe().is_err(),
+            "a silently reopened connection is not subscribed, and next_push \
+             (which has no retry of its own) would block on it forever"
+        );
     }
 }
