@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="resources/os-alertU.png" alt="AlertU — lock your machine, stay in control: a Linux CLI tool that turns any USB/Bluetooth remote into a car alarm for your computer">
+</p>
+
 # AlertU
 
 A Linux re-imagining of the old Mac **iAlertU**: a cheap USB/Bluetooth HID remote
@@ -97,13 +101,25 @@ sudo install -Dm755 target/release/alertu-daemon   /usr/local/bin/alertu-daemon
 sudo install -Dm755 target/release/alertu-ctl      /usr/local/bin/alertu-ctl
 install  -Dm755 target/release/alertu-gui           ~/.local/bin/alertu-gui
 install  -Dm755 target/release/alertu-settings      ~/.local/bin/alertu-settings
-sudo useradd --system --groups input,video alertu   # dedicated daemon user
+# Dedicated daemon account, in the groups it needs for /dev/input and the webcam.
+sudo systemd-sysusers packaging/sysusers.d/alertu.conf
+# (equivalent one-liner: sudo useradd --system --groups input,video alertu)
+
 sudo install -Dm644 packaging/config.example.toml /etc/alertu/config.toml
 sudo install -Dm644 packaging/alertu-daemon.service /etc/systemd/system/alertu-daemon.service
 sudo systemctl enable --now alertu-daemon
 
 install -Dm644 packaging/alertu-gui.service ~/.config/systemd/user/alertu-gui.service
 systemctl --user enable --now alertu-gui
+
+# Application icon and menu entry for the settings window.
+for s in 48 64 128 256 512; do
+  install -Dm644 "packaging/icons/hicolor/${s}x${s}/apps/alertu.png" \
+    ~/.local/share/icons/hicolor/${s}x${s}/apps/alertu.png
+done
+install -Dm644 packaging/alertu-settings.desktop \
+  ~/.local/share/applications/alertu-settings.desktop
+gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 ```
 
 Put three WAV files where the config points (`beep`, `warning`, `siren`), and
@@ -145,8 +161,20 @@ the optional `alarm_webhook_url`.
 ## Platform
 
 Linux with systemd. Works across X11 and Wayland because it only uses
-`logind`/`loginctl` — no dependency on a specific compositor or desktop. The user
-must be in the `input` and `video` groups.
+`logind`/`loginctl` — no dependency on a specific compositor or desktop.
+
+**Groups.** It is the *daemon's* account that needs `input` (to read
+`/dev/input/event*`, which is `root:input` mode `0660`) and `video` (webcam
+capture). The systemd install above creates that account already in both, so
+your own login needs no group change: the tray, the settings window and
+`alertu-ctl` only speak to the socket and touch no device directly.
+
+The exception is running the daemon **by hand** — during development, or to
+identify a new remote — in which case whoever launches it needs `input` too:
+
+```sh
+sudo usermod -aG input "$USER"   # then start a new session, or use `newgrp input`
+```
 
 ## Deliberate scope & design choices
 

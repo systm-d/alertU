@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AlertU Settings
+GenericName=Alarm Settings
+Comment=Configure the AlertU guard: remote, watched devices, delays, sounds
+Exec=alertu-settings
+Icon=alertu
+Terminal=false
+Categories=Settings;Security;
+Keywords=alarm;security;lock;screen;remote;guard;
+StartupNotify=true
