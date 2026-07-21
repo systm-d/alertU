@@ -10,12 +10,15 @@ use crate::state::GuardState;
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A live connection to `alertu-daemon`.
 pub struct Client {
     writer: UnixStream,
     reader: BufReader<UnixStream>,
+    /// Kept so the connection can be re-established on demand.
+    socket: PathBuf,
+    reconnect: bool,
 }
 
 impl Client {
@@ -28,11 +31,50 @@ impl Client {
             )
         })?;
         let reader = BufReader::new(writer.try_clone().context("cloning socket")?);
-        Ok(Client { writer, reader })
+        Ok(Client {
+            writer,
+            reader,
+            socket: socket.to_path_buf(),
+            reconnect: false,
+        })
     }
 
-    /// Send one request and read exactly one reply.
+    /// Reconnect and retry once when a request fails on I/O.
+    ///
+    /// Opt-in, and deliberately not the default: a dropped connection is no
+    /// evidence about whether the daemon acted on the request, so replaying
+    /// `Arm`/`Disarm`/`Toggle` could re-arm an alarm the user just disarmed.
+    /// Enable it only for a caller whose requests are idempotent — the settings
+    /// window, which sends nothing but `GetConfig`, `ListDevices` and
+    /// `SetConfig`.
+    pub fn with_reconnect(mut self) -> Self {
+        self.reconnect = true;
+        self
+    }
+
+    /// Re-establish the connection in place, keeping the same `Client`.
+    fn reopen(&mut self) -> Result<()> {
+        let fresh = Client::connect(&self.socket)?;
+        self.writer = fresh.writer;
+        self.reader = fresh.reader;
+        Ok(())
+    }
+
+    /// Send one request and read exactly one reply, retrying once through a
+    /// fresh connection when [`Client::with_reconnect`] is enabled.
     fn round_trip(&mut self, req: &Request) -> Result<Response> {
+        match self.attempt_round_trip(req) {
+            Ok(resp) => Ok(resp),
+            Err(e) if self.reconnect => {
+                self.reopen().context(format!("retrying after: {e}"))?;
+                self.attempt_round_trip(req)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Attempt one request/response round trip without retry.
+    fn attempt_round_trip(&mut self, req: &Request) -> Result<Response> {
         let mut line = serde_json::to_string(req).context("serializing request")?;
         line.push('\n');
         self.writer
@@ -151,6 +193,35 @@ mod tests {
         path
     }
 
+    /// A fake daemon that serves several connections in turn. Each entry is one
+    /// session's replies; an empty slice means "accept, then hang up without
+    /// answering", which is what a daemon restart looks like to a client.
+    fn fake_daemon_sessions(
+        dir: &std::path::Path,
+        sessions: &'static [&'static [&'static str]],
+    ) -> PathBuf {
+        let path = dir.join("multi.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        thread::spawn(move || {
+            for replies in sessions {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                if replies.is_empty() {
+                    continue; // drop the connection unanswered
+                }
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                for reply in *replies {
+                    let _ = writeln!(stream, "{reply}");
+                }
+                let _ = stream.flush();
+            }
+        });
+        path
+    }
+
     #[test]
     fn arm_accepts_an_ok_reply() {
         let dir = tempfile::tempdir().unwrap();
@@ -194,5 +265,26 @@ mod tests {
                 state: GuardState::Armed
             }
         );
+    }
+
+    #[test]
+    fn without_reconnect_a_dropped_connection_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_daemon_sessions(dir.path(), &[&[], &[r#"{"event":"ok"}"#]]);
+        let mut client = Client::connect(&path).unwrap();
+        assert!(
+            client.set_config(Config::default()).is_err(),
+            "a client without reconnect must surface the dropped connection"
+        );
+    }
+
+    #[test]
+    fn with_reconnect_a_dropped_connection_is_retried_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fake_daemon_sessions(dir.path(), &[&[], &[r#"{"event":"ok"}"#]]);
+        let mut client = Client::connect(&path).unwrap().with_reconnect();
+        client
+            .set_config(Config::default())
+            .expect("the retry should have reached the second session");
     }
 }

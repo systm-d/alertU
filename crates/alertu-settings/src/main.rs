@@ -80,7 +80,7 @@ impl SettingsApp {
 
     /// (Re)connect and load config + devices + state from the daemon.
     fn reconnect(&mut self) {
-        match Client::connect(&self.socket) {
+        match Client::connect(&self.socket).map(Client::with_reconnect) {
             Ok(mut c) => {
                 match (c.get_config(), c.list_devices(), c.get_state()) {
                     (Ok(cfg), Ok(devices), state) => {
