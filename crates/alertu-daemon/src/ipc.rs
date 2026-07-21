@@ -66,6 +66,17 @@ async fn handle_conn(
     let mut lines = BufReader::new(read_half).lines();
     let mut subscribed = false;
 
+    // These receivers are clones of the long-lived ones held by `serve`, which
+    // never marks anything seen, so they start out flagged as "changed" as soon
+    // as the machine has published anything at all. Left alone, the very first
+    // `changed()` below would resolve immediately and push a duplicate of the
+    // snapshot the `Subscribe` reply already carries — a phantom transition for
+    // anything reading `status --watch`. Mark them current: subscribers only
+    // want what happens *after* they subscribe (the tray asks for `ListDevices`
+    // explicitly at startup).
+    state_rx.mark_unchanged();
+    devices_rx.mark_unchanged();
+
     loop {
         tokio::select! {
             line = lines.next_line() => {

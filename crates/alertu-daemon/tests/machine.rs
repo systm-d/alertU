@@ -27,6 +27,10 @@ fn test_config(tmp: &Path) -> Config {
         remote_device: "/nonexistent/remote".to_string(),
         watch_devices: vec!["/nonexistent/watch".to_string()],
         grace_period_secs: 0,
+        // Keep this at 1s or higher, never lower: the `watch` channel coalesces,
+        // so if `Triggered -> Alarm` fired before the test observed `Triggered`,
+        // the receiver would only ever see `Alarm` and the `Triggered`
+        // assertion would sit there until its 5-second timeout.
         alarm_delay_secs: 1,
         beep_sound: PathBuf::from("/nonexistent/beep.wav"),
         warning_sound: PathBuf::from("/nonexistent/warning.wav"),
