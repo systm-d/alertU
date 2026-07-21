@@ -219,6 +219,10 @@ mod tests {
     }
 
     /// The committed reference files came from `docs/superpowers/gensounds.py`.
+    /// Their paths are anchored to `CARGO_MANIFEST_DIR` rather than the process
+    /// working directory, matching the `include_bytes!` convention next door and
+    /// surviving any runner that does not start the test binary in the package
+    /// root.
     /// The Rust port must agree with them on every property that matters; exact
     /// bytes may differ because the fade multiplies in f32 here, f64 there — up
     /// to ±2 LSB per sample is tolerated for that reason, but no more, so a
@@ -226,8 +230,14 @@ mod tests {
     #[test]
     fn matches_the_committed_reference_files() {
         for (generated, reference) in [
-            (encode_wav(&warning_tick()), "../../resources/warning.wav"),
-            (encode_wav(&siren()), "../../resources/siren.wav"),
+            (
+                encode_wav(&warning_tick()),
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/warning.wav"),
+            ),
+            (
+                encode_wav(&siren()),
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/siren.wav"),
+            ),
         ] {
             let expected =
                 std::fs::read(reference).unwrap_or_else(|e| panic!("reading {reference}: {e}"));

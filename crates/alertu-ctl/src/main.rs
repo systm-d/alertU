@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use render::Outcome;
 use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -121,12 +122,27 @@ fn main() -> ExitCode {
 /// runtime. Chosen over a synthesized sine because it simply sounds better.
 const BEEP_WAV: &[u8] = include_bytes!("../../../resources/lock.wav");
 
+/// Modes forced onto the destination directory and the files written into it.
+///
+/// Explicit, because the documented install step is
+/// `sudo alertu-ctl gen-sounds --dir /usr/share/sounds/alertu`: with a umask of
+/// `0027` the defaults would land as root-owned 0750/0640, which the
+/// unprivileged `alertu` service account cannot read. That failure is silent —
+/// `sound.rs::play_once` only checks `path.exists()` and sends the player's
+/// stderr to `/dev/null` — so all audio would simply disappear.
+const DIR_MODE: u32 = 0o755;
+const FILE_MODE: u32 = 0o644;
+
 /// Write the three default sounds into `dir`.
 ///
 /// Refuses to overwrite unless `force`, because the natural destination is a
 /// system directory a user may have customised.
 fn write_sounds(dir: &Path, force: bool) -> Result<()> {
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    // Applied whether or not we created it: the whole point of this command is
+    // to leave behind sounds the daemon's service account can actually read.
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(DIR_MODE))
+        .with_context(|| format!("setting mode on {}", dir.display()))?;
 
     let files: [(&str, Vec<u8>); 3] = [
         ("beep.wav", BEEP_WAV.to_vec()),
@@ -152,19 +168,25 @@ fn write_sounds(dir: &Path, force: bool) -> Result<()> {
     for (name, bytes) in &files {
         let path = dir.join(name);
         std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
+        // After the write, so an overwritten file's old, tighter mode is
+        // corrected too — `fs::write` keeps the mode of a file that exists.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(FILE_MODE))
+            .with_context(|| format!("setting mode on {}", path.display()))?;
     }
     Ok(())
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
-    // Commands that never touch the socket are handled first.
-    if let Command::GenSounds { dir, force } = &cli.command {
-        write_sounds(dir, *force)?;
-        print_outcome(&Outcome::Ack, cli.json)?;
-        return Ok(());
-    }
-
     match &cli.command {
+        // `gen-sounds` never opens a socket, so every way it can fail is a
+        // local input error: exit 2, not the daemon code. It lives in this
+        // match rather than behind an early return precisely so that no
+        // second, unreachable `GenSounds` arm can exist.
+        Command::GenSounds { dir, force } => {
+            write_sounds(dir, *force).map_err(CliError::usage)?;
+            print_outcome(&Outcome::Ack, cli.json)?;
+            Ok(())
+        }
         // Validate the file locally *before* connecting, so a malformed or
         // invalid config reports its own precise error instead of a generic
         // "is alertu-daemon running?" failure when there is nothing to blame
@@ -204,10 +226,6 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         }),
         Command::ListDevices => {
             with_client(cli, |client| Ok(Outcome::Devices(client.list_devices()?)))
-        }
-        Command::GenSounds { .. } => {
-            // Already handled in the early-return above.
-            Ok(())
         }
     }
 }
@@ -525,6 +543,108 @@ mod tests {
             !dir.path().join("siren.wav").exists(),
             "a refused run must not create any file, including ones later in the write order"
         );
+    }
+
+    /// `gen-sounds` never opens a socket, so exit 1 ("the daemon said no, try
+    /// again later") is never the right answer for it: a script that retries on
+    /// 1 would loop forever on a clobber refusal.
+    #[test]
+    fn gen_sounds_refusing_to_clobber_exits_with_the_usage_code() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("beep.wav"), b"precious").unwrap();
+        let cli = Cli::try_parse_from([
+            "alertu-ctl",
+            "gen-sounds",
+            "--dir",
+            dir.path().to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let err = run(&cli).unwrap_err();
+
+        assert_eq!(err.code, EXIT_USAGE, "got: {:#}", err.source);
+    }
+
+    #[test]
+    fn gen_sounds_into_an_impossible_dir_exits_with_the_usage_code() {
+        let cli = Cli::try_parse_from(["alertu-ctl", "gen-sounds", "--dir", "/proc/nope/sounds"])
+            .unwrap();
+
+        let err = run(&cli).unwrap_err();
+
+        assert_eq!(err.code, EXIT_USAGE, "got: {:#}", err.source);
+    }
+
+    /// The generated files must be readable by the daemon's service account
+    /// whatever the caller's umask, since a sound the daemon cannot read fails
+    /// silently.
+    ///
+    /// `umask(2)` is process-global and the test harness is multi-threaded, so
+    /// setting it in-process would race every other test. Instead this test
+    /// re-runs *itself* in a child process under `umask 0077`, which is what
+    /// makes the assertion meaningful: under the usual 0022 the modes would come
+    /// out right by accident.
+    #[test]
+    fn gen_sounds_writes_readable_files_whatever_the_umask() {
+        const MARKER: &str = "ALERTU_GEN_SOUNDS_UMASK_CHILD";
+
+        if std::env::var_os(MARKER).is_none() {
+            let exe = std::env::current_exe().unwrap();
+            let status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!(
+                    "umask 0077; exec {exe:?} --exact --nocapture \
+                     tests::gen_sounds_writes_readable_files_whatever_the_umask"
+                ))
+                .env(MARKER, "1")
+                .status()
+                .expect("re-running the test binary under a restrictive umask");
+            assert!(status.success(), "the run under umask 0077 failed");
+            return;
+        }
+
+        // Child: a fresh subdirectory, so `create_dir_all` really creates it.
+        let parent = tempfile::tempdir().unwrap();
+        let dir = parent.path().join("alertu");
+
+        write_sounds(&dir, false).unwrap();
+
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode(&dir),
+            DIR_MODE,
+            "the destination directory must not inherit the umask"
+        );
+        for name in ["beep.wav", "warning.wav", "siren.wav"] {
+            assert_eq!(
+                mode(&dir.join(name)),
+                FILE_MODE,
+                "{name} must not inherit the umask"
+            );
+        }
+    }
+
+    /// `fs::write` leaves an existing file's mode alone, so `--force` onto a
+    /// tightly-permissioned file must still end up world-readable.
+    #[test]
+    fn gen_sounds_force_relaxes_the_mode_of_an_overwritten_file() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["beep.wav", "warning.wav", "siren.wav"] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"precious").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        write_sounds(dir.path(), true).unwrap();
+
+        for name in ["beep.wav", "warning.wav", "siren.wav"] {
+            let mode = std::fs::metadata(dir.path().join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, FILE_MODE, "{name} kept its old restrictive mode");
+        }
     }
 
     #[test]
