@@ -129,6 +129,15 @@ gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 Make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
 `paplay`/`pw-play`/`aplay`/`ffplay`/`play` (audio) are installed.
 
+**Upgrading.** If you installed an earlier version, the control socket is now
+`0660` instead of world-connectable. Join the daemon's group and start a new
+session, or the tray, the settings window and `alertu-ctl` will all fail to
+connect:
+
+```sh
+sudo usermod -aG alertu "$USER"   # then start a new session, or use `newgrp alertu`
+```
+
 ## Command line
 
 `alertu-ctl` does everything the tray does, from a shell or a script:
@@ -197,9 +206,13 @@ sudo usermod -aG input "$USER"   # then start a new session, or use `newgrp inpu
 ### Threat-model note
 
 This is a personal convenience gadget, not a hardened security product. The IPC
-socket is created world-connectable (`0o666`) so a normal desktop session can
-reach the root/`alertu`-owned daemon; there is no binary anti-tampering. Don't
-rely on it as a real anti-theft mechanism.
+socket is created `0o660`, so access is limited to members of the daemon's
+group (`alertu` under the systemd install) — but that access is equivalent to
+full control of the alarm: disarming it, reading the config including the
+webhook URL, and `SetConfig`, which steers the paths handed to the helper
+programs. Treat group membership as a privilege grant, not a convenience, and
+don't rely on this as a real anti-theft mechanism; there is no binary
+anti-tampering either.
 
 ## License
 

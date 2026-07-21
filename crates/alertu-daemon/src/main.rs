@@ -9,6 +9,7 @@ use alertu_common::config::Config;
 use alertu_common::protocol::DEFAULT_SOCKET_PATH;
 use alertu_common::state::GuardState;
 use alertu_daemon::machine::{Channels, Control, Machine};
+use alertu_daemon::perms::{self, Privileges};
 use alertu_daemon::session::{self, SessionCtl};
 use alertu_daemon::sound::SoundPlayer;
 use alertu_daemon::{hotplug, ipc};
@@ -22,11 +23,15 @@ use tracing::{info, warn};
 struct Args {
     config: PathBuf,
     socket: PathBuf,
+    /// Not a `Config` field: it is a command-line flag precisely so it cannot
+    /// be changed over the very socket it protects.
+    socket_group: Option<String>,
 }
 
 fn parse_args() -> Args {
     let mut config = Config::default_path();
     let mut socket = PathBuf::from(DEFAULT_SOCKET_PATH);
+    let mut socket_group = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -40,10 +45,17 @@ fn parse_args() -> Args {
                     socket = PathBuf::from(v);
                 }
             }
+            "--socket-group" => {
+                if let Some(v) = it.next() {
+                    socket_group = Some(v);
+                }
+            }
             "--help" | "-h" => {
                 println!(
-                    "alertu-daemon [--config <path>] [--socket <path>]\n\n\
-                     Defaults:\n  config: {}\n  socket: {}",
+                    "alertu-daemon [--config <path>] [--socket <path>] [--socket-group <name>]\n\n\
+                     Defaults:\n  config: {}\n  socket: {}\n  socket group: the daemon's own group\n\n\
+                     The control socket is created 0660. Members of its group get full\n\
+                     control of the alarm; treat membership as a privilege grant.",
                     Config::default_path().display(),
                     DEFAULT_SOCKET_PATH
                 );
@@ -54,7 +66,11 @@ fn parse_args() -> Args {
             }
         }
     }
-    Args { config, socket }
+    Args {
+        config,
+        socket,
+        socket_group,
+    }
 }
 
 #[tokio::main]
@@ -67,6 +83,18 @@ async fn main() -> Result<()> {
         .init();
 
     let args = parse_args();
+
+    // Resolved up front: an unknown group must abort startup, never silently
+    // leave a socket more permissive than the operator asked for.
+    let privileges = Privileges {
+        group_gid: match &args.socket_group {
+            Some(name) => Some(
+                perms::resolve_gid(name)
+                    .with_context(|| format!("resolving --socket-group {name}"))?,
+            ),
+            None => None,
+        },
+    };
 
     let cfg = Config::load(&args.config)
         .with_context(|| format!("loading config {}", args.config.display()))?;
@@ -116,7 +144,7 @@ async fn main() -> Result<()> {
     // failure aborts startup loudly instead of leaving an uncontrollable daemon
     // running with nothing in the log.
     let socket_path = args.socket.clone();
-    let listener = ipc::bind(&socket_path)
+    let listener = ipc::bind(&socket_path, privileges)
         .with_context(|| format!("binding the control socket {}", socket_path.display()))?;
     let ipc_handle = tokio::spawn(ipc::serve(listener, state_rx, devices_rx, ctrl_tx));
 

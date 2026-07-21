@@ -368,3 +368,20 @@ fn an_unbindable_socket_aborts_startup_with_a_diagnostic() {
         "startup failure did not name the control socket; stderr was:\n{stderr}"
     );
 }
+
+/// The control socket is a privilege boundary: group-accessible, never
+/// world-accessible. A regression here silently exposes full alarm control
+/// (disarm, read the webhook URL, redirect the helper programs) to every local
+/// account.
+#[test]
+fn the_control_socket_is_not_world_accessible() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let harness = start();
+    let mode = std::fs::metadata(&harness.socket)
+        .expect("stat the socket")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o660, "socket mode was {mode:o}, expected 0660");
+}

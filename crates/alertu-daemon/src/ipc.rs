@@ -1,10 +1,10 @@
 //! Unix-socket IPC server: newline-delimited JSON, one connection per GUI.
 
 use crate::machine::Control;
+use crate::perms::{self, Privileges};
 use alertu_common::protocol::{InputDeviceInfo, Request, Response};
 use alertu_common::state::GuardState;
 use anyhow::{Context, Result};
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -20,15 +20,31 @@ use tracing::{debug, info, warn};
 /// — aborts startup with a diagnostic instead of leaving a daemon running with
 /// no way to control it.
 ///
-/// The socket is created with `0o666` so a per-session GUI running as the
-/// desktop user can connect to the root-owned daemon. This is a personal
-/// gadget, not a hardened multi-user service (see the README's threat-model
-/// note); tighten via directory permissions if needed.
-pub fn bind(socket_path: &Path) -> Result<UnixListener> {
-    if let Some(parent) = socket_path.parent() {
+/// The socket is created `0o660`: reachable by the daemon's own user and group,
+/// never by everyone else. Connecting grants full command of the alarm —
+/// disarm, read the config including the webhook URL, `SetConfig` to redirect
+/// the paths handed to the helper programs — so group membership is a
+/// privilege grant, not a convenience. Any failure here aborts startup with a
+/// diagnostic.
+pub fn bind(socket_path: &Path, privileges: Privileges) -> Result<UnixListener> {
+    let parent = socket_path.parent();
+
+    if let Some(parent) = parent {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating socket dir {}", parent.display()))?;
+        // Tighten the parent directory *before* binding, not only when an
+        // explicit group is given. `bind` and the `chmod` that follows it below
+        // are two separate syscalls, and between them the socket briefly sits at
+        // whatever mode the process umask produced — under a permissive umask
+        // that is a real window in which a non-group member can connect and
+        // issue commands (e.g. `disarm`). A `0750` parent closes that window
+        // regardless of umask: nothing can traverse into the directory to reach
+        // the socket at all, whatever the socket's own mode happens to be at
+        // that instant.
+        perms::chmod(parent, 0o750)
+            .with_context(|| format!("setting mode on socket dir {}", parent.display()))?;
     }
+
     // Remove a stale socket from a previous run.
     if socket_path.exists() {
         std::fs::remove_file(socket_path)
@@ -37,8 +53,19 @@ pub fn bind(socket_path: &Path) -> Result<UnixListener> {
 
     let listener = UnixListener::bind(socket_path)
         .with_context(|| format!("binding socket {}", socket_path.display()))?;
-    std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o666))
-        .with_context(|| format!("setting perms on {}", socket_path.display()))?;
+    perms::chmod(socket_path, 0o660)?;
+
+    // With an explicit group, the parent directory must carry it too, or the
+    // group cannot traverse into the socket and the flag is silently
+    // inoperative. systemd recreates this directory on every start, so the
+    // change does not persist.
+    if let Some(gid) = privileges.group_gid {
+        perms::chgrp(socket_path, gid)?;
+        if let Some(parent) = parent {
+            perms::chgrp(parent, gid)?;
+        }
+    }
+
     info!(socket = %socket_path.display(), "IPC listening");
     Ok(listener)
 }
