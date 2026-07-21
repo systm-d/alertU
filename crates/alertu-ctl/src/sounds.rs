@@ -81,13 +81,19 @@ pub fn warning_tick() -> Vec<f32> {
     out
 }
 
-/// The looping alarm siren: a 600↔1400 Hz sweep that restarts seamlessly.
+/// Instantaneous phase of the siren sweep at time `t`, in radians.
 ///
 /// Instantaneous frequency is `f_mid + f_dev·sin(2πt/T)`, completing exactly one
-/// modulation cycle over the file. Integrating gives the phase below; because
-/// `f_mid · T` is a whole number, the phase at the end lands a whole number of
-/// cycles from the start, so `siren_loop` respawning the player continues the
-/// waveform rather than stepping.
+/// modulation cycle over the file. This is `2π∫f dt`, i.e. its integral; because
+/// `f_mid · T` is a whole number, the phase at `t = T` lands a whole number of
+/// cycles from the phase at `t = 0`, so `siren_loop` respawning the player
+/// continues the waveform rather than stepping.
+fn siren_phase(t: f64) -> f64 {
+    2.0 * std::f64::consts::PI * SIREN_F_MID * t
+        - (SIREN_F_DEV * SIREN_SECS) * (2.0 * std::f64::consts::PI * t / SIREN_SECS).cos()
+}
+
+/// The looping alarm siren: a 600↔1400 Hz sweep that restarts seamlessly.
 pub fn siren() -> Vec<f32> {
     const AMP: f32 = 0.75;
 
@@ -95,9 +101,7 @@ pub fn siren() -> Vec<f32> {
     let mut out: Vec<f32> = (0..n)
         .map(|i| {
             let t = i as f64 / SAMPLE_RATE as f64;
-            let phase = 2.0 * std::f64::consts::PI * SIREN_F_MID * t
-                - (SIREN_F_DEV * SIREN_SECS) * (2.0 * std::f64::consts::PI * t / SIREN_SECS).cos();
-            AMP * phase.sin() as f32
+            AMP * siren_phase(t).sin() as f32
         })
         .collect();
     fade_ends(&mut out, 8.0);
@@ -182,19 +186,45 @@ mod tests {
     /// The reason the siren loops without clicking: over one file the phase
     /// advances by a whole number of cycles, so restarting it continues the
     /// waveform. `siren_loop` respawns the player every iteration, so this is a
-    /// requirement, not polish.
+    /// requirement, not polish. This exercises the actual phase expression, not
+    /// just the constants it's built from.
     #[test]
     fn the_sirens_phase_closes_on_a_whole_number_of_cycles() {
-        let advance = SIREN_F_MID * SIREN_SECS;
+        let advance = siren_phase(SIREN_SECS) - siren_phase(0.0);
+        let cycles = advance / (2.0 * std::f64::consts::PI);
         assert!(
-            (advance - advance.round()).abs() < 1e-9,
-            "f_mid * duration must be integral, got {advance}"
+            (cycles - cycles.round()).abs() < 1e-9,
+            "phase advance over one file must be a whole number of cycles, got {cycles}"
+        );
+    }
+
+    /// Instantaneous frequency (the derivative of phase, in Hz) should be
+    /// `SIREN_F_MID` at both ends of the file, since the `sin` modulation term
+    /// completes exactly one cycle. Estimated via a central difference on the
+    /// extracted phase function, so a mistranscribed formula is caught here too.
+    #[test]
+    fn the_sirens_frequency_matches_f_mid_at_both_ends() {
+        let h = 1e-6;
+        let freq_at = |t: f64| {
+            (siren_phase(t + h) - siren_phase(t - h)) / (2.0 * h) / (2.0 * std::f64::consts::PI)
+        };
+        let start = freq_at(0.0);
+        let end = freq_at(SIREN_SECS);
+        assert!(
+            (start - SIREN_F_MID).abs() < 1e-3,
+            "frequency at t=0 was {start}, expected {SIREN_F_MID}"
+        );
+        assert!(
+            (end - SIREN_F_MID).abs() < 1e-3,
+            "frequency at t=SIREN_SECS was {end}, expected {SIREN_F_MID}"
         );
     }
 
     /// The committed reference files came from `docs/superpowers/gensounds.py`.
     /// The Rust port must agree with them on every property that matters; exact
-    /// bytes may differ because the fade multiplies in f32 here, f64 there.
+    /// bytes may differ because the fade multiplies in f32 here, f64 there — up
+    /// to ±2 LSB per sample is tolerated for that reason, but no more, so a
+    /// genuinely wrong formula (e.g. a mistranscribed phase) still fails.
     #[test]
     fn matches_the_committed_reference_files() {
         for (generated, reference) in [
@@ -213,6 +243,16 @@ mod tests {
                 &expected[0..44],
                 "{reference}: header differs"
             );
+
+            let got = samples_of(&generated);
+            let want = samples_of(&expected);
+            for (i, (g, w)) in got.iter().zip(want.iter()).enumerate() {
+                let diff = (i32::from(*g) - i32::from(*w)).abs();
+                assert!(
+                    diff <= 2,
+                    "{reference}: sample {i} differs by more than 2 LSB: got {g}, want {w}"
+                );
+            }
         }
     }
 }
