@@ -11,7 +11,7 @@
 # only; a user unit found there would be installed and enabled system-wide.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 stage="$root/target/deb-staging"
 
 rm -rf "$stage"
