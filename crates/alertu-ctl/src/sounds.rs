@@ -1,18 +1,16 @@
-//! Synthesis of AlertU's default sounds as 16-bit mono PCM WAV.
+//! Synthesis of the countdown tick, as a 16-bit mono PCM WAV.
 //!
-//! No dependencies: the RIFF header is written by hand and the waveforms are
+//! No dependencies: the RIFF header is written by hand and the waveform is
 //! computed directly. Ported from `docs/superpowers/gensounds.py`, whose output
-//! was validated on real hardware.
+//! is committed as `assets/warning.wav` and pins this code.
+//!
+//! Only the tick is synthesized. The chirp and the siren are recordings
+//! embedded by `main.rs` — they sound better than a sine sweep. The tick stays
+//! generated because it must be a few tens of milliseconds: `play_once` spawns a
+//! player once a second during the countdown, so a longer file would pile up.
 
-/// Sample rate of every generated file.
+/// Sample rate of the generated file.
 pub const SAMPLE_RATE: u32 = 44_100;
-
-/// Siren length, in seconds.
-pub const SIREN_SECS: f64 = 2.0;
-/// Centre frequency of the siren sweep, in hertz.
-pub const SIREN_F_MID: f64 = 1000.0;
-/// Peak deviation either side of the centre frequency, in hertz.
-pub const SIREN_F_DEV: f64 = 400.0;
 
 /// Encode mono samples in `[-1.0, 1.0]` as a 16-bit PCM WAV file.
 ///
@@ -76,33 +74,6 @@ pub fn warning_tick() -> Vec<f32> {
         })
         .collect();
     fade_ends(&mut out, 6.0);
-    out
-}
-
-/// Instantaneous phase of the siren sweep at time `t`, in radians.
-///
-/// Instantaneous frequency is `f_mid + f_dev·sin(2πt/T)`, completing exactly one
-/// modulation cycle over the file. This is `2π∫f dt`, i.e. its integral; because
-/// `f_mid · T` is a whole number, the phase at `t = T` lands a whole number of
-/// cycles from the phase at `t = 0`, so `siren_loop` respawning the player
-/// continues the waveform rather than stepping.
-fn siren_phase(t: f64) -> f64 {
-    2.0 * std::f64::consts::PI * SIREN_F_MID * t
-        - (SIREN_F_DEV * SIREN_SECS) * (2.0 * std::f64::consts::PI * t / SIREN_SECS).cos()
-}
-
-/// The looping alarm siren: a 600↔1400 Hz sweep that restarts seamlessly.
-pub fn siren() -> Vec<f32> {
-    const AMP: f32 = 0.75;
-
-    let n = (SAMPLE_RATE as f64 * SIREN_SECS) as usize;
-    let mut out: Vec<f32> = (0..n)
-        .map(|i| {
-            let t = i as f64 / SAMPLE_RATE as f64;
-            AMP * siren_phase(t).sin() as f32
-        })
-        .collect();
-    fade_ends(&mut out, 8.0);
     out
 }
 
@@ -171,74 +142,22 @@ mod tests {
         assert!((0.15..=0.20).contains(&peak), "peak was {peak}");
     }
 
-    #[test]
-    fn the_siren_is_two_seconds_and_starts_and_ends_silent() {
-        let s = siren();
-        assert_eq!(s.len(), SAMPLE_RATE as usize * 2);
-        assert_eq!(s[0], 0.0);
-        assert_eq!(*s.last().unwrap(), 0.0);
-        let peak = s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-        assert!((0.70..=0.80).contains(&peak), "peak was {peak}");
-    }
-
-    /// The reason the siren loops without clicking: over one file the phase
-    /// advances by a whole number of cycles, so restarting it continues the
-    /// waveform. `siren_loop` respawns the player every iteration, so this is a
-    /// requirement, not polish. This exercises the actual phase expression, not
-    /// just the constants it's built from.
-    #[test]
-    fn the_sirens_phase_closes_on_a_whole_number_of_cycles() {
-        let advance = siren_phase(SIREN_SECS) - siren_phase(0.0);
-        let cycles = advance / (2.0 * std::f64::consts::PI);
-        assert!(
-            (cycles - cycles.round()).abs() < 1e-9,
-            "phase advance over one file must be a whole number of cycles, got {cycles}"
-        );
-    }
-
-    /// Instantaneous frequency (the derivative of phase, in Hz) should be
-    /// `SIREN_F_MID` at both ends of the file, since the `sin` modulation term
-    /// completes exactly one cycle. Estimated via a central difference on the
-    /// extracted phase function, so a mistranscribed formula is caught here too.
-    #[test]
-    fn the_sirens_frequency_matches_f_mid_at_both_ends() {
-        let h = 1e-6;
-        let freq_at = |t: f64| {
-            (siren_phase(t + h) - siren_phase(t - h)) / (2.0 * h) / (2.0 * std::f64::consts::PI)
-        };
-        let start = freq_at(0.0);
-        let end = freq_at(SIREN_SECS);
-        assert!(
-            (start - SIREN_F_MID).abs() < 1e-3,
-            "frequency at t=0 was {start}, expected {SIREN_F_MID}"
-        );
-        assert!(
-            (end - SIREN_F_MID).abs() < 1e-3,
-            "frequency at t=SIREN_SECS was {end}, expected {SIREN_F_MID}"
-        );
-    }
-
-    /// The committed reference files came from `docs/superpowers/gensounds.py`.
-    /// Their paths are anchored to `CARGO_MANIFEST_DIR` rather than the process
-    /// working directory, matching the `include_bytes!` convention next door and
-    /// surviving any runner that does not start the test binary in the package
-    /// root.
-    /// The Rust port must agree with them on every property that matters; exact
+    /// The committed reference came from `docs/superpowers/gensounds.py` and was
+    /// validated by ear. Its path is anchored to `CARGO_MANIFEST_DIR` rather than
+    /// the process working directory, matching the `include_bytes!` convention
+    /// next door and surviving any runner that does not start the test binary in
+    /// the package root.
+    ///
+    /// The Rust port must agree with it on every property that matters; exact
     /// bytes may differ because the fade multiplies in f32 here, f64 there — up
     /// to ±2 LSB per sample is tolerated for that reason, but no more, so a
-    /// genuinely wrong formula (e.g. a mistranscribed phase) still fails.
+    /// genuinely wrong formula still fails.
     #[test]
-    fn matches_the_committed_reference_files() {
-        for (generated, reference) in [
-            (
-                encode_wav(&warning_tick()),
-                concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/warning.wav"),
-            ),
-            (
-                encode_wav(&siren()),
-                concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/siren.wav"),
-            ),
-        ] {
+    fn matches_the_committed_reference_file() {
+        for (generated, reference) in [(
+            encode_wav(&warning_tick()),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/warning.wav"),
+        )] {
             let expected =
                 std::fs::read(reference).unwrap_or_else(|e| panic!("reading {reference}: {e}"));
             assert_eq!(

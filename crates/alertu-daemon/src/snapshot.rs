@@ -2,7 +2,7 @@
 
 use crate::perms::{self, Privileges};
 use alertu_common::config::Config;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use tracing::{info, warn};

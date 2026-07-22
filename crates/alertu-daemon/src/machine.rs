@@ -14,7 +14,7 @@ use crate::perms::Privileges;
 use crate::session::SessionCtl;
 use crate::snapshot;
 use crate::sound::SoundPlayer;
-use crate::transitions::{decide, Effect, Event};
+use crate::transitions::{Effect, Event, decide};
 use crate::webhook;
 use alertu_common::config::Config;
 use alertu_common::protocol::InputDeviceInfo;
@@ -202,17 +202,17 @@ impl Machine {
 
         // Warning ticks are periodic within `Triggered`, not a state change, so
         // they live here rather than in the transition table.
-        if let Some(warn_at) = self.next_warning {
-            if now >= warn_at {
-                self.sound.play_once(&self.cfg.warning_sound);
-                self.next_warning = Some(now + WARNING_INTERVAL);
-            }
+        if let Some(warn_at) = self.next_warning
+            && now >= warn_at
+        {
+            self.sound.play_once(&self.cfg.warning_sound);
+            self.next_warning = Some(now + WARNING_INTERVAL);
         }
 
-        if let Some(alarm_at) = self.alarm_deadline {
-            if now >= alarm_at {
-                self.apply(Event::CountdownElapsed).await;
-            }
+        if let Some(alarm_at) = self.alarm_deadline
+            && now >= alarm_at
+        {
+            self.apply(Event::CountdownElapsed).await;
         }
     }
 

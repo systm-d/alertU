@@ -5,7 +5,13 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 description = "Shared types (config, state, IPC protocol) for AlertU."
+readme = "README.md"
+documentation = "https://docs.rs/alertu-common"
+keywords = ["alertu", "alarm", "security", "ipc", "linux"]
+categories = ["os::linux-apis", "config"]
 
 [dependencies]
 anyhow.workspace = true
@@ -21,3 +27,6 @@ ipc-client = []
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lints]
+workspace = true

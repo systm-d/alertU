@@ -13,7 +13,7 @@ use alertu_daemon::perms::{self, Privileges};
 use alertu_daemon::session::{self, SessionCtl};
 use alertu_daemon::sound::SoundPlayer;
 use alertu_daemon::{hotplug, ipc};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
 
 /// Resolve when the process receives SIGINT or SIGTERM.
 async fn shutdown_signal() {
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
     let mut term = match signal(SignalKind::terminate()) {
         Ok(s) => s,
         Err(e) => {

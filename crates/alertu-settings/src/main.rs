@@ -8,9 +8,9 @@
 
 #![forbid(unsafe_code)]
 
-use alertu_common::config::{Config, AUTO};
+use alertu_common::config::{AUTO, Config};
 use alertu_common::ipc_client::Client;
-use alertu_common::protocol::{InputDeviceInfo, DEFAULT_SOCKET_PATH};
+use alertu_common::protocol::{DEFAULT_SOCKET_PATH, InputDeviceInfo};
 use alertu_common::state::GuardState;
 use eframe::egui;
 use std::path::PathBuf;
@@ -18,10 +18,10 @@ use std::path::PathBuf;
 fn socket_path() -> PathBuf {
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
-        if matches!(arg.as_str(), "--socket" | "-s") {
-            if let Some(v) = it.next() {
-                return PathBuf::from(v);
-            }
+        if matches!(arg.as_str(), "--socket" | "-s")
+            && let Some(v) = it.next()
+        {
+            return PathBuf::from(v);
         }
     }
     PathBuf::from(DEFAULT_SOCKET_PATH)

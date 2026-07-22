@@ -5,7 +5,13 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 description = "AlertU privileged daemon: evdev, state machine, session lock, audio, snapshots."
+readme = "README.md"
+documentation = "https://docs.rs/alertu-daemon"
+keywords = ["alertu", "alarm", "evdev", "security", "daemon"]
+categories = ["command-line-utilities", "os::linux-apis"]
 
 [lib]
 name = "alertu_daemon"
@@ -16,7 +22,7 @@ name = "alertu-daemon"
 path = "src/main.rs"
 
 [dependencies]
-alertu-common = { path = "../alertu-common" }
+alertu-common = { path = "../alertu-common", version = "0.1.0" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -33,5 +39,8 @@ libc.workspace = true
 zbus.workspace = true
 
 [dev-dependencies]
-alertu-common = { path = "../alertu-common", features = ["ipc-client"] }
+alertu-common = { path = "../alertu-common", version = "0.1.0", features = ["ipc-client"] }
 tempfile.workspace = true
+
+[lints]
+workspace = true

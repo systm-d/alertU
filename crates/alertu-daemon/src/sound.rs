@@ -6,8 +6,8 @@
 //! shell out for webcam capture — at the cost of one subprocess per sound.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::process::Command;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;

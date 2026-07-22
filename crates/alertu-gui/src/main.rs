@@ -17,7 +17,7 @@
 
 mod tray;
 
-use alertu_common::protocol::{Request, Response, DEFAULT_SOCKET_PATH};
+use alertu_common::protocol::{DEFAULT_SOCKET_PATH, Request, Response};
 use anyhow::{Context, Result};
 use ksni::TrayMethods;
 use std::path::{Path, PathBuf};
@@ -31,10 +31,10 @@ use tray::AlertuTray;
 fn socket_path() -> PathBuf {
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
-        if matches!(arg.as_str(), "--socket" | "-s") {
-            if let Some(v) = it.next() {
-                return PathBuf::from(v);
-            }
+        if matches!(arg.as_str(), "--socket" | "-s")
+            && let Some(v) = it.next()
+        {
+            return PathBuf::from(v);
         }
     }
     PathBuf::from(DEFAULT_SOCKET_PATH)
@@ -293,10 +293,9 @@ mod tests {
         }
         if let Ok(Ok(Some(l))) =
             tokio::time::timeout(Duration::from_millis(200), lines.next_line()).await
+            && let Ok(req) = serde_json::from_str(&l)
         {
-            if let Ok(req) = serde_json::from_str(&l) {
-                seen.push(req);
-            }
+            seen.push(req);
         }
         seen
     }

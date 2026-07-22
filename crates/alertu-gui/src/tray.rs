@@ -9,7 +9,7 @@
 //! While the daemon is unreachable, queued requests are dropped rather than
 //! replayed, so the action items are disabled and the tooltip says so.
 
-use alertu_common::config::{Config, AUTO};
+use alertu_common::config::{AUTO, Config};
 use alertu_common::protocol::{InputDeviceInfo, Request};
 use alertu_common::state::GuardState;
 use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
@@ -414,9 +414,5 @@ fn delta_item(label: &str, apply: fn(&mut Config)) -> MenuItem<AlertuTray> {
 
 /// Bullet prefix marking the currently-selected radio option.
 fn mark(selected: bool) -> &'static str {
-    if selected {
-        "● "
-    } else {
-        "  "
-    }
+    if selected { "● " } else { "  " }
 }

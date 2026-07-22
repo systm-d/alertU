@@ -11,7 +11,7 @@ mod sounds;
 
 use alertu_common::config::Config;
 use alertu_common::ipc_client::Client;
-use alertu_common::protocol::{Response, DEFAULT_SOCKET_PATH};
+use alertu_common::protocol::{DEFAULT_SOCKET_PATH, Response};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use render::Outcome;
@@ -120,9 +120,17 @@ fn main() -> ExitCode {
     }
 }
 
-/// The arm/disarm chirp, embedded so `gen-sounds` needs no data files at
-/// runtime. Chosen over a synthesized sine because it simply sounds better.
-const BEEP_WAV: &[u8] = include_bytes!("../../../resources/lock.wav");
+/// The arm/disarm chirp and the alarm siren, embedded so `gen-sounds` needs no
+/// data files at runtime. Both are recordings rather than synthesis: they simply
+/// sound better than a sine sweep. Only the countdown tick is still generated,
+/// because it has to be a few tens of milliseconds — `play_once` spawns a player
+/// once a second, so anything longer would pile up.
+///
+/// They live under `assets/` rather than the repository's `resources/` because
+/// `cargo package` only includes files inside the crate; reaching outside it
+/// would make this crate unpublishable.
+const BEEP_WAV: &[u8] = include_bytes!("../assets/lock.wav");
+const SIREN_WAV: &[u8] = include_bytes!("../assets/siren.wav");
 
 /// Modes forced onto the destination directory and the files written into it.
 ///
@@ -149,7 +157,7 @@ fn write_sounds(dir: &Path, force: bool) -> Result<()> {
     let files: [(&str, Vec<u8>); 3] = [
         ("beep.wav", BEEP_WAV.to_vec()),
         ("warning.wav", sounds::encode_wav(&sounds::warning_tick())),
-        ("siren.wav", sounds::encode_wav(&sounds::siren())),
+        ("siren.wav", SIREN_WAV.to_vec()),
     ];
 
     // Check every destination before writing any of them, so a refusal

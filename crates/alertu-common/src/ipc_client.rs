@@ -7,7 +7,7 @@
 use crate::config::Config;
 use crate::protocol::{InputDeviceInfo, Request, Response};
 use crate::state::GuardState;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};

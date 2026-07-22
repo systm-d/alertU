@@ -5,14 +5,20 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 description = "AlertU per-session GUI: StatusNotifierItem tray, device selection and settings."
+readme = "README.md"
+documentation = "https://docs.rs/alertu-gui"
+keywords = ["alertu", "alarm", "tray", "statusnotifier", "linux"]
+categories = ["gui", "os::linux-apis"]
 
 [[bin]]
 name = "alertu-gui"
 path = "src/main.rs"
 
 [dependencies]
-alertu-common = { path = "../alertu-common" }
+alertu-common = { path = "../alertu-common", version = "0.1.0" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -23,3 +29,6 @@ ksni = "0.3"
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lints]
+workspace = true

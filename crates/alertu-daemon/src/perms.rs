@@ -9,7 +9,7 @@
 //! `std::os::unix::fs::chown` and `std::fs::set_permissions`, both entirely
 //! safe.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::ffi::CString;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
@@ -314,13 +314,15 @@ mod tests {
             return; // only one group here; nothing that would discriminate
         };
 
-        assert!(secure_dir(
-            &target,
-            Privileges {
-                group_gid: Some(other)
-            }
-        )
-        .unwrap());
+        assert!(
+            secure_dir(
+                &target,
+                Privileges {
+                    group_gid: Some(other)
+                }
+            )
+            .unwrap()
+        );
 
         let meta = std::fs::metadata(&target).unwrap();
         assert_eq!(meta.gid(), other, "the group boundary was not applied");

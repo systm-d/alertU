@@ -1,19 +1,15 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/alertu-common",
-    "crates/alertu-daemon",
-    "crates/alertu-gui",
-    "crates/alertu-settings",
-    "crates/alertu-ctl",
-]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 authors = ["Systm D"]
 repository = "https://github.com/systm-d/alertu"
+homepage = "https://github.com/systm-d/alertu"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -29,6 +25,20 @@ tempfile = "3"
 libc = "0.2"
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 
+# `deny` rather than the more usual `forbid`: `alertu-daemon`'s `perms` module
+# needs one `libc::getgrnam_r` call, and `forbid` cannot be lifted by an
+# `#[allow]`. The four crates with no FFI keep their own crate-level
+# `#![forbid(unsafe_code)]`, which is stronger than this and self-documenting.
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+# `clippy::all` is already clippy's default group, so this changes nothing
+# today. It pins the rule in the repository instead of leaving it to whatever
+# flags CI happens to pass.
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
 [profile.release]
-lto = "thin"
+lto = true
+codegen-units = 1
 strip = true

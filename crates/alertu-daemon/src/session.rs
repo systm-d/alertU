@@ -110,13 +110,12 @@ async fn resolve_session_id(cfg: &Config) -> String {
         .args(["show-seat", "seat0", "-p", "ActiveSession", "--value"])
         .output()
         .await
+        && out.status.success()
     {
-        if out.status.success() {
-            let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !id.is_empty() {
-                debug!(session = %id, "resolved active session on seat0");
-                return id;
-            }
+        let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !id.is_empty() {
+            debug!(session = %id, "resolved active session on seat0");
+            return id;
         }
     }
 
@@ -125,15 +124,14 @@ async fn resolve_session_id(cfg: &Config) -> String {
         .args(["list-sessions", "--no-legend"])
         .output()
         .await
+        && out.status.success()
     {
-        if out.status.success() {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if let Some(first) = text.lines().next() {
-                if let Some(id) = first.split_whitespace().next() {
-                    debug!(session = %id, "resolved first listed session");
-                    return id.to_string();
-                }
-            }
+        let text = String::from_utf8_lossy(&out.stdout);
+        if let Some(first) = text.lines().next()
+            && let Some(id) = first.split_whitespace().next()
+        {
+            debug!(session = %id, "resolved first listed session");
+            return id.to_string();
         }
     }
 
@@ -149,16 +147,16 @@ pub async fn monitor(session: SessionCtl, tx: mpsc::Sender<bool>, interval: Dura
     let mut last: Option<bool> = None;
     loop {
         tokio::time::sleep(interval).await;
-        if let Some(locked) = session.is_locked().await {
-            if last != Some(locked) {
-                if last.is_some() {
-                    debug!(locked, "session lock state changed");
-                    if tx.send(locked).await.is_err() {
-                        return;
-                    }
+        if let Some(locked) = session.is_locked().await
+            && last != Some(locked)
+        {
+            if last.is_some() {
+                debug!(locked, "session lock state changed");
+                if tx.send(locked).await.is_err() {
+                    return;
                 }
-                last = Some(locked);
             }
+            last = Some(locked);
         }
     }
 }

@@ -5,14 +5,23 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 description = "AlertU settings window (egui): edit config and pick devices via the daemon socket."
+readme = "README.md"
+documentation = "https://docs.rs/alertu-settings"
+keywords = ["alertu", "alarm", "gui", "egui", "settings"]
+categories = ["gui", "os::linux-apis"]
 
 [[bin]]
 name = "alertu-settings"
 path = "src/main.rs"
 
 [dependencies]
-alertu-common = { path = "../alertu-common", features = ["ipc-client"] }
+alertu-common = { path = "../alertu-common", version = "0.1.0", features = ["ipc-client"] }
 anyhow.workspace = true
 serde_json.workspace = true
 eframe = "0.29"
+
+[lints]
+workspace = true

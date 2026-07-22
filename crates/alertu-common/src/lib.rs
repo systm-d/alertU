@@ -10,5 +10,5 @@ pub mod state;
 pub mod ipc_client;
 
 pub use config::Config;
-pub use protocol::{InputDeviceInfo, Request, Response, DEFAULT_SOCKET_PATH};
+pub use protocol::{DEFAULT_SOCKET_PATH, InputDeviceInfo, Request, Response};
 pub use state::GuardState;
