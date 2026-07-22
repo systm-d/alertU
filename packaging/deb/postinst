@@ -21,10 +21,15 @@ configure)
     if [ -x /usr/bin/gtk-update-icon-cache ]; then
         gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
     fi
+    ;;
+esac
 
+#DEBHELPER#
+
+if [ -z "$2" ]; then
     cat <<'EOF'
 
-AlertU is installed and its daemon is running.
+AlertU has been installed and its services have been configured.
 
 Its control socket is mode 0660, owned by the `alertu` group. Connecting to it
 grants full command of the alarm, so membership is a privilege grant — which is
@@ -40,9 +45,6 @@ No remote is configured yet. Run `alertu-ctl list-devices`, then set
 /usr/share/doc/alertu/config.example.toml.
 
 EOF
-    ;;
-esac
-
-#DEBHELPER#
+fi
 
 exit 0
