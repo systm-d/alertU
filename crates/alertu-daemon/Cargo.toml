@@ -134,14 +134,14 @@ assets = [
     { source = "../../packaging/icons/hicolor/128x128/apps/alertu.png", dest = "/usr/share/icons/hicolor/128x128/apps/alertu.png", mode = "644" },
     { source = "../../packaging/icons/hicolor/256x256/apps/alertu.png", dest = "/usr/share/icons/hicolor/256x256/apps/alertu.png", mode = "644" },
     { source = "../../packaging/icons/hicolor/512x512/apps/alertu.png", dest = "/usr/share/icons/hicolor/512x512/apps/alertu.png", mode = "644" },
-    # No `doc = true` on the example config or the licence. Fedora's container
-    # and cloud images set `tsflags=nodocs` in /etc/dnf/dnf.conf, which drops
-    # every file marked %doc -- and both the %post message and README.Fedora
-    # send the reader to /usr/share/doc/alertu/config.example.toml, which would
-    # not be there. README.Fedora keeps the flag: it is genuinely documentation,
-    # and an image built with nodocs is not one anybody reads a README on.
+    # No `doc = true` on any of these three. Fedora's container and cloud
+    # images set `tsflags=nodocs` in /etc/dnf/dnf.conf, which drops every file
+    # marked %doc -- and all three are files something else points at: the
+    # %post message and README.Fedora send the reader to config.example.toml,
+    # and README.md sends them to README.Fedora. A path named in running output
+    # has to exist. Together they are a few kilobytes of text.
     { source = "../../packaging/config.example.toml", dest = "/usr/share/doc/alertu/config.example.toml", mode = "644" },
-    { source = "../../packaging/rpm/README.Fedora",   dest = "/usr/share/doc/alertu/README.Fedora",      mode = "644", doc = true },
+    { source = "../../packaging/rpm/README.Fedora",   dest = "/usr/share/doc/alertu/README.Fedora",      mode = "644" },
     { source = "../../LICENSE", dest = "/usr/share/licenses/alertu/LICENSE", mode = "644" },
 ]
 
