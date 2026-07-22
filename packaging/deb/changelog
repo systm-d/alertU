@@ -1,0 +1,10 @@
+alertu (0.1.0-1) unstable; urgency=medium
+
+  * Initial Debian package.
+  * Ships the daemon, the tray, the settings window and alertu-ctl, the
+    system unit, the user unit for the tray, the generated sounds and the
+    desktop entry.
+  * No configuration file: the daemon writes /etc/alertu/config.toml itself
+    on first use, so nothing here is a conffile.
+
+ -- Kevin Delfour <kevin@delfour.co>  Tue, 21 Jul 2026 10:12:00 +0200

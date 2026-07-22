@@ -56,6 +56,9 @@ workspace = true
 name = "alertu"
 maintainer = "Kevin Delfour <kevin@delfour.co>"
 license-file = ["../../LICENSE", "0"]
+# Policy 12.7 requires a changelog for a non-native package; without this
+# lintian reports E: no-changelog.
+changelog = "../../packaging/deb/changelog"
 extended-description = """
 A cheap USB or Bluetooth HID remote becomes the key fob for a Linux desktop.
 Click to arm: the session locks. Activity on a watched input device then starts
@@ -64,7 +67,11 @@ A personal gadget, not an anti-theft system."""
 section = "utils"
 priority = "optional"
 depends = "$auto, systemd"
-recommends = "ffmpeg | fswebcam, pulseaudio-utils | alsa-utils"
+# fswebcam first: apt installs the leading alternative, and ffmpeg drags in
+# GTK3, Mesa, SDL2 and some two hundred more packages to take one still.
+# libgl1/libxkbcommon0 are dlopen'ed by winit and glutin, so `$auto` cannot see
+# them and the GUI would otherwise declare no runtime dependencies at all.
+recommends = "fswebcam | ffmpeg, pulseaudio-utils | alsa-utils, libgl1, libxkbcommon0"
 assets = [
     ["../../target/release/alertu-daemon",   "usr/bin/",  "755"],
     ["../../target/release/alertu-ctl",      "usr/bin/",  "755"],

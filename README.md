@@ -115,17 +115,38 @@ would rather not install them.
 
 ### Debian and Ubuntu
 
-A `.deb` is attached to each [release](https://github.com/systm-d/alertU/releases):
+A `.deb` is attached to each [release](https://github.com/systm-d/alertU/releases),
+named `alertu_<version>_amd64.deb`. It needs **Debian 13 (trixie) or newer, or
+Ubuntu 24.04 or newer**: the package is built on Ubuntu 24.04, so its glibc
+dependency floor follows and `dpkg` will refuse it on bookworm or 22.04. Build
+from source on older releases.
+
+**If you installed manually before**, remove that install first — otherwise its
+unit in `/etc/systemd/system` and its binaries in `/usr/local/bin` keep winning
+over the packaged ones, and `apt purge` will not remove either:
 
 ```sh
-sudo apt install ./alertu.deb
-sudo usermod -aG alertu "$USER"   # then log out and back in
+sudo systemctl disable --now alertu-daemon
+sudo rm -f /etc/systemd/system/alertu-daemon.service
+sudo rm -f /usr/local/bin/alertu-daemon /usr/local/bin/alertu-ctl
+rm -f ~/.local/bin/alertu-gui ~/.local/bin/alertu-settings
+rm -f ~/.config/systemd/user/alertu-gui.service
+```
+
+Then:
+
+```sh
+sudo apt install ./alertu_*_amd64.deb
+sudo usermod -aG alertu "$USER"      # then log out and back in
+systemctl --user enable --now alertu-gui
 ```
 
 The package installs all four binaries, the systemd units, the sounds and the
 desktop entry, and starts the daemon. It deliberately ships no configuration
-file — the daemon writes its own on first use — and it cannot add you to the
-`alertu` group, which is why that second line is not optional. See
+file — the daemon writes its own on first use — and neither of the last two
+lines is optional: a package cannot add you to the `alertu` group, and a
+system-level maintainer script has no business enabling a unit in your user
+systemd instance, so the tray is shipped but left for you to start. See
 `/usr/share/doc/alertu/README.Debian`.
 
 Building from source, on any distribution:

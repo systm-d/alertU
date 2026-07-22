@@ -1,7 +1,42 @@
 AlertU for Debian
 =================
 
-Two things this package deliberately does not do.
+Which releases this package installs on
+---------------------------------------
+
+Debian 13 (trixie) or newer, Ubuntu 24.04 or newer. The package is built on
+Ubuntu 24.04, so its glibc dependency floor follows it, and dpkg will refuse to
+install on Debian 12 (bookworm) or Ubuntu 22.04. Build from source there.
+
+If you installed manually before
+--------------------------------
+
+The manual instructions put a unit in /etc/systemd/system and binaries in
+/usr/local/bin. Both take precedence over this package's — the unit shadows
+/usr/lib/systemd/system/alertu-daemon.service, and /usr/local/bin comes before
+/usr/bin on PATH — so the package looks installed while the old build keeps
+running. `apt purge` removes neither. Clear them out before installing:
+
+    sudo systemctl disable --now alertu-daemon
+    sudo rm -f /etc/systemd/system/alertu-daemon.service
+    sudo rm -f /usr/local/bin/alertu-daemon /usr/local/bin/alertu-ctl
+    rm -f ~/.local/bin/alertu-gui ~/.local/bin/alertu-settings
+    rm -f ~/.config/systemd/user/alertu-gui.service
+
+Three things this package deliberately does not do.
+
+It does not start the tray for you.
+-----------------------------------
+
+The tray is the primary way to use AlertU, but its unit is a *user* unit, and a
+system-level maintainer script has no business writing to your systemd user
+instance — a user-preset fragment would only apply to instances created after
+installation, which is not the one you are logged into. So, once per user:
+
+    systemctl --user enable --now alertu-gui
+
+Without it the daemon runs and `alertu-ctl` works, but nothing appears in the
+system tray.
 
 It does not add you to the `alertu` group.
 -----------------------------------------

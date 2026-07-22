@@ -26,8 +26,17 @@ esac
 
 #DEBHELPER#
 
-if [ -z "$2" ]; then
-    cat <<'EOF'
+# Guidance for a first-time install only ("$2" is the previously configured
+# version, empty on a fresh install). Kept inside a `configure` arm so it
+# cannot print on `postinst abort-remove`, and placed below the debhelper
+# marker above so it is the last thing on screen, under dpkg's systemd chatter.
+# Do not name that marker here: cargo-deb substitutes every occurrence of the
+# literal token, including one inside a comment, which would splice generated
+# code into the middle of this sentence and break the script.
+case "$1" in
+configure)
+    if [ -z "$2" ]; then
+        cat <<'EOF'
 
 AlertU has been installed and its services have been configured.
 
@@ -40,11 +49,18 @@ also why this package cannot grant it for you. Add yourself:
 then log out and back in. Until you do, the tray, the settings window and
 alertu-ctl will not be able to reach the daemon.
 
+The tray is shipped but not started: it is a user service, and a package must
+not touch your systemd user instance. Once logged back in, run:
+
+    systemctl --user enable --now alertu-gui
+
 No remote is configured yet. Run `alertu-ctl list-devices`, then set
 `remote_name_hint` to part of your remote's name. See
 /usr/share/doc/alertu/config.example.toml.
 
 EOF
-fi
+    fi
+    ;;
+esac
 
 exit 0

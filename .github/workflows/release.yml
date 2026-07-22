@@ -48,28 +48,39 @@ jobs:
       - name: Build
         run: cargo build --release --locked
 
+      # No -o: cargo-deb's default name is the Debian convention
+      # (alertu_0.1.0-1_amd64.deb), which is what someone holding two releases
+      # needs. It prints the path it wrote, so capture that rather than
+      # reconstructing the name from the version and the architecture.
       - name: Stage and package
         run: |
           ./packaging/deb/stage.sh
-          cargo deb --no-build -p alertu-daemon -o target/alertu.deb
+          deb=$(cargo deb --no-build -p alertu-daemon)
+          echo "deb=$deb" >> "$GITHUB_ENV"
+          echo "produced $deb"
 
       # Unlike the developer's Fedora machine, this runner has a Debian package
       # database, so `$auto` resolves real dependencies here — and this is the
       # only place that can be checked.
       - name: Show what was produced
         run: |
-          dpkg-deb -I target/alertu.deb
-          dpkg-deb -c target/alertu.deb
+          dpkg-deb -I "$deb"
+          dpkg-deb -c "$deb"
+          dpkg-deb -f "$deb" Depends | grep -q libc6 || { echo "Depends lost its \$auto resolution" >&2; exit 1; }
 
       # A package that builds but does not install is worthless, and that is
       # only ever discovered by trying. The runner has systemd, so the unit is
       # genuinely enabled and started here.
+      #
+      # `is-enabled` passes for a unit that enabled cleanly and then died on
+      # start, and cargo-deb's generated start fragment is itself `|| true`, so
+      # `is-active` is the assertion that actually catches a broken daemon.
       - name: Install it
         run: |
-          sudo apt-get install -y ./target/alertu.deb
+          sudo apt-get install -y "$deb"
           alertu-ctl --version
           systemctl is-enabled alertu-daemon
-          sudo systemctl status alertu-daemon --no-pager --lines=0 || true
+          systemctl is-active --quiet alertu-daemon || { sudo journalctl -u alertu-daemon --no-pager -n 50; exit 1; }
           dpkg -L alertu | sort
 
       - name: Remove it again
@@ -78,10 +89,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: alertu-deb
-          path: target/alertu.deb
+          path: ${{ env.deb }}
 
+      # `upload` requires a release to exist already, which it does not when the
+      # tag was pushed with plain `git tag && git push --tags`. Create it if
+      # missing, fall back to uploading into one made by hand or by the UI.
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" target/alertu.deb --clobber
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$deb" --generate-notes ||
+            gh release upload "$GITHUB_REF_NAME" "$deb" --clobber
