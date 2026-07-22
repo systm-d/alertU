@@ -114,6 +114,9 @@ restart-after-upgrade = true
 name = "alertu"
 summary = "Car-alarm-style intrusion guard for Linux desktops"
 license = "MIT"
+post_install_script = "../../packaging/rpm/post_install.sh"
+pre_uninstall_script = "../../packaging/rpm/pre_uninstall.sh"
+post_uninstall_script = "../../packaging/rpm/post_uninstall.sh"
 # Built and verified on Fedora 43. The effective floor is whatever glibc symbol
 # versions --auto-req records, which is looser than a distribution version.
 assets = [
