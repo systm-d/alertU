@@ -54,7 +54,7 @@ jobs:
       # reconstructing the name from the version and the architecture.
       - name: Stage and package
         run: |
-          ./packaging/deb/stage.sh
+          ./packaging/stage.sh
           deb=$(cargo deb --no-build -p alertu-daemon)
           echo "deb=$deb" >> "$GITHUB_ENV"
           echo "produced $deb"
