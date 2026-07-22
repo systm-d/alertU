@@ -160,13 +160,61 @@ restart-after-upgrade = true
 the workspace's `authors = ["Systm D"]` has no address, so it cannot be derived.
 Flag it in your report so the owner can change it before anything is published.
 
-- [ ] **Step 3: Create a placeholder README.Debian so the asset resolves**
+- [ ] **Step 3: Create the maintainer-scripts directory and its README.Debian**
 
-The asset list references it and Task 2 writes it properly. For now:
+`packaging/deb/` must exist for `maintainer-scripts` to resolve — cargo-deb
+requires the directory even when empty. Git does not track empty directories, so
+this task also writes the file that documents the package's two deliberate
+omissions. Its content depends only on decisions already taken in the spec, not
+on the scripts Task 2 adds.
 
 ```bash
 mkdir -p packaging/deb
-printf 'Placeholder, replaced in Task 2.\n' > packaging/deb/README.Debian
+```
+
+Create `packaging/deb/README.Debian`:
+
+```
+AlertU for Debian
+=================
+
+Two things this package deliberately does not do.
+
+It does not add you to the `alertu` group.
+-----------------------------------------
+
+The daemon's control socket is mode 0660, owned by `alertu`. Anyone who can
+connect to it can disarm the alarm, read the configuration including the
+webhook URL, and redirect the paths handed to the helper programs. Group
+membership is therefore a privilege grant, not a convenience.
+
+A package cannot grant it: it does not know which account is yours, $SUDO_USER
+is absent during a non-interactive upgrade, and Debian policy forbids modifying
+existing accounts. So:
+
+    sudo usermod -aG alertu <user>
+
+then log out and back in. Without it, the tray, the settings window and
+alertu-ctl will all fail to connect.
+
+It does not ship a configuration file.
+--------------------------------------
+
+The daemon rewrites its configuration whenever you change a setting from the
+tray, the settings window or `alertu-ctl set-config`. A file under /etc would be
+a conffile, and dpkg would ask you to resolve a conflict on every upgrade.
+
+Instead the package creates /etc/alertu/ and lets the daemon write
+config.toml there itself. A commented example is in this directory. The daemon
+starts on built-in defaults, with no remote configured, and says so in its log.
+
+Removing the package
+--------------------
+
+`apt remove` leaves your configuration; `apt purge` deletes /etc/alertu.
+
+Neither touches /var/lib/alertu/snapshots. Those are webcam stills from alarms
+you may still want. Remove them by hand.
 ```
 
 - [ ] **Step 4: Build and stage**
@@ -259,7 +307,6 @@ git commit -m "build(deb): package metadata and staging"
 
 **Files:**
 - Create: `packaging/deb/postinst`, `packaging/deb/prerm`, `packaging/deb/postrm`
-- Modify: `packaging/deb/README.Debian`
 
 **Interfaces:**
 - Consumes: the metadata from Task 1, which sets `maintainer-scripts = "../../packaging/deb"`.
@@ -363,52 +410,13 @@ exit 0
 
 Make all three executable: `chmod +x packaging/deb/postinst packaging/deb/prerm packaging/deb/postrm`.
 
-- [ ] **Step 3: Write README.Debian**
+- [ ] **Step 3: Check the scripts and README.Debian agree**
 
-Replace the placeholder at `packaging/deb/README.Debian`:
-
-```
-AlertU for Debian
-=================
-
-Two things this package deliberately does not do.
-
-It does not add you to the `alertu` group.
------------------------------------------
-
-The daemon's control socket is mode 0660, owned by `alertu`. Anyone who can
-connect to it can disarm the alarm, read the configuration including the
-webhook URL, and redirect the paths handed to the helper programs. Group
-membership is therefore a privilege grant, not a convenience.
-
-A package cannot grant it: it does not know which account is yours, $SUDO_USER
-is absent during a non-interactive upgrade, and Debian policy forbids modifying
-existing accounts. So:
-
-    sudo usermod -aG alertu <user>
-
-then log out and back in. Without it, the tray, the settings window and
-alertu-ctl will all fail to connect.
-
-It does not ship a configuration file.
---------------------------------------
-
-The daemon rewrites its configuration whenever you change a setting from the
-tray, the settings window or `alertu-ctl set-config`. A file under /etc would be
-a conffile, and dpkg would ask you to resolve a conflict on every upgrade.
-
-Instead the package creates /etc/alertu/ and lets the daemon write
-config.toml there itself. A commented example is in this directory. The daemon
-starts on built-in defaults, with no remote configured, and says so in its log.
-
-Removing the package
---------------------
-
-`apt remove` leaves your configuration; `apt purge` deletes /etc/alertu.
-
-Neither touches /var/lib/alertu/snapshots. Those are webcam stills from alarms
-you may still want. Remove them by hand.
-```
+`packaging/deb/README.Debian` was written in Task 1 and promises specific
+behaviour. Read it against the three scripts you just wrote and confirm each
+claim holds: purge removes `/etc/alertu`, purge leaves
+`/var/lib/alertu/snapshots`, and no configuration file is shipped. A document
+that describes behaviour the scripts do not have is worse than none.
 
 - [ ] **Step 4: Rebuild the package**
 
