@@ -272,9 +272,17 @@ fn subscribing_after_a_state_change_pushes_nothing_until_the_next_transition() {
     // gets the pushed value itself. (A socket read timeout would need `Client`
     // to expose the underlying stream, and would degrade the second assertion
     // into matching on an error string.)
+    // Only *state* pushes are the subject here. A subscriber also receives the
+    // device list whenever `/dev/input` changes, and that is legitimate: the
+    // daemon watches it with inotify, so plugging a keyboard — or a peripheral
+    // waking up as the screen unlocks — genuinely pushes one. Forwarding those
+    // made this test fail intermittently for a reason that was never a bug.
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         while let Ok(push) = watcher.next_push() {
+            if matches!(push, Response::Devices { .. }) {
+                continue;
+            }
             if tx.send(push).is_err() {
                 break;
             }
@@ -283,10 +291,7 @@ fn subscribing_after_a_state_change_pushes_nothing_until_the_next_transition() {
 
     match rx.recv_timeout(Duration::from_secs(1)) {
         Err(RecvTimeoutError::Timeout) => {}
-        Ok(push) => panic!(
-            "a fresh subscriber was pushed {push:?} with no transition to report \
-             (only a genuine /dev/input hotplug could legitimately push here)"
-        ),
+        Ok(push) => panic!("a fresh subscriber was pushed {push:?} with no transition to report"),
         Err(RecvTimeoutError::Disconnected) => panic!("the subscribed connection died"),
     }
 
