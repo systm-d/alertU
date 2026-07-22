@@ -149,6 +149,43 @@ system-level maintainer script has no business enabling a unit in your user
 systemd instance, so the tray is shipped but left for you to start. See
 `/usr/share/doc/alertu/README.Debian`.
 
+### Fedora
+
+An `.rpm` is attached to each [release](https://github.com/systm-d/alertU/releases),
+named `alertu-<version>-1.x86_64.rpm`. It needs **Fedora 40 or newer**: the
+package is built and verified on Fedora 43, and `--auto-req` records the
+actual `GLIBC_*` symbol versions the binaries reference rather than asserting
+one — the highest is `GLIBC_2.39`, which ships in Fedora 40. Build from
+source on older releases.
+
+**If you installed manually before**, remove that install first — otherwise its
+unit in `/etc/systemd/system` and its binaries in `/usr/local/bin` keep winning
+over the packaged ones, and `dnf remove` will not remove either:
+
+```sh
+sudo systemctl disable --now alertu-daemon
+sudo rm -f /etc/systemd/system/alertu-daemon.service
+sudo rm -f /usr/local/bin/alertu-daemon /usr/local/bin/alertu-ctl
+rm -f ~/.local/bin/alertu-gui ~/.local/bin/alertu-settings
+rm -f ~/.config/systemd/user/alertu-gui.service
+```
+
+Then:
+
+```sh
+sudo dnf install ./alertu-*.x86_64.rpm
+sudo systemctl enable --now alertu-daemon
+sudo usermod -aG alertu "$USER"      # then log out and back in
+systemctl --user enable --now alertu-gui
+```
+
+Unlike the `.deb`, the package does not start the daemon. Fedora applies preset
+policy rather than enabling third-party units, and overriding that would
+disregard a decision the administrator may have made deliberately — so the
+second line is yours to run. Nor can a package add you to the `alertu` group,
+or enable a unit in your user systemd instance. See
+`/usr/share/doc/alertu/README.Fedora`.
+
 Building from source, on any distribution:
 
 ## Install (systemd)

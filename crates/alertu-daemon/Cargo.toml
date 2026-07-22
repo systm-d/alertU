@@ -77,8 +77,8 @@ assets = [
     ["../../target/release/alertu-ctl",      "usr/bin/",  "755"],
     ["../../target/release/alertu-gui",      "usr/bin/",  "755"],
     ["../../target/release/alertu-settings", "usr/bin/",  "755"],
-    ["../../target/deb-staging/user/alertu-gui.service", "usr/lib/systemd/user/", "644"],
-    ["../../target/deb-staging/sounds/*.wav", "usr/share/sounds/alertu/", "644"],
+    ["../../target/pkg-staging/user/alertu-gui.service", "usr/lib/systemd/user/", "644"],
+    ["../../target/pkg-staging/sounds/*.wav", "usr/share/sounds/alertu/", "644"],
     ["../../packaging/sysusers.d/alertu.conf", "usr/lib/sysusers.d/", "644"],
     ["../../packaging/alertu-settings.desktop", "usr/share/applications/", "644"],
     ["../../packaging/icons/hicolor/48x48/apps/alertu.png",   "usr/share/icons/hicolor/48x48/apps/",   "644"],
@@ -100,7 +100,71 @@ maintainer-scripts = "../../packaging/deb"
 # never appear here.
 [package.metadata.deb.systemd-units]
 unit-name = "alertu-daemon"
-unit-scripts = "../../target/deb-staging/system"
+unit-scripts = "../../target/pkg-staging/system"
 enable = true
 start = true
 restart-after-upgrade = true
+
+# --- Fedora RPM -------------------------------------------------------------
+#
+# Deliberately mirrors [package.metadata.deb] above: same binaries, same paths,
+# same sounds, same icons. Keep the two lists in step; if you add a file to one,
+# add it to the other.
+[package.metadata.generate-rpm]
+name = "alertu"
+summary = "Car-alarm-style intrusion guard for Linux desktops"
+license = "MIT"
+post_install_script = "../../packaging/rpm/post_install.sh"
+pre_uninstall_script = "../../packaging/rpm/pre_uninstall.sh"
+post_uninstall_script = "../../packaging/rpm/post_uninstall.sh"
+# Built and verified on Fedora 43. The effective floor is whatever glibc symbol
+# versions --auto-req records, which is looser than a distribution version.
+assets = [
+    { source = "../../target/release/alertu-daemon",   dest = "/usr/bin/alertu-daemon",   mode = "755" },
+    { source = "../../target/release/alertu-ctl",      dest = "/usr/bin/alertu-ctl",      mode = "755" },
+    { source = "../../target/release/alertu-gui",      dest = "/usr/bin/alertu-gui",      mode = "755" },
+    { source = "../../target/release/alertu-settings", dest = "/usr/bin/alertu-settings", mode = "755" },
+    { source = "../../target/pkg-staging/system/alertu-daemon.service", dest = "/usr/lib/systemd/system/alertu-daemon.service", mode = "644" },
+    { source = "../../target/pkg-staging/user/alertu-gui.service",      dest = "/usr/lib/systemd/user/alertu-gui.service",      mode = "644" },
+    { source = "../../target/pkg-staging/sounds/*.wav", dest = "/usr/share/sounds/alertu/", mode = "644" },
+    { source = "../../packaging/sysusers.d/alertu.conf", dest = "/usr/lib/sysusers.d/alertu.conf", mode = "644" },
+    { source = "../../packaging/alertu-settings.desktop", dest = "/usr/share/applications/alertu-settings.desktop", mode = "644" },
+    { source = "../../packaging/icons/hicolor/48x48/apps/alertu.png",   dest = "/usr/share/icons/hicolor/48x48/apps/alertu.png",   mode = "644" },
+    { source = "../../packaging/icons/hicolor/64x64/apps/alertu.png",   dest = "/usr/share/icons/hicolor/64x64/apps/alertu.png",   mode = "644" },
+    { source = "../../packaging/icons/hicolor/128x128/apps/alertu.png", dest = "/usr/share/icons/hicolor/128x128/apps/alertu.png", mode = "644" },
+    { source = "../../packaging/icons/hicolor/256x256/apps/alertu.png", dest = "/usr/share/icons/hicolor/256x256/apps/alertu.png", mode = "644" },
+    { source = "../../packaging/icons/hicolor/512x512/apps/alertu.png", dest = "/usr/share/icons/hicolor/512x512/apps/alertu.png", mode = "644" },
+    # No `doc = true` on any of these three. Fedora's container and cloud
+    # images set `tsflags=nodocs` in /etc/dnf/dnf.conf, which drops every file
+    # marked %doc -- and all three are files something else points at: the
+    # %post message and README.Fedora send the reader to config.example.toml,
+    # and README.md sends them to README.Fedora. A path named in running output
+    # has to exist. Together they are a few kilobytes of text.
+    { source = "../../packaging/config.example.toml", dest = "/usr/share/doc/alertu/config.example.toml", mode = "644" },
+    { source = "../../packaging/rpm/README.Fedora",   dest = "/usr/share/doc/alertu/README.Fedora",      mode = "644" },
+    { source = "../../LICENSE", dest = "/usr/share/licenses/alertu/LICENSE", mode = "644" },
+]
+
+# By file path, not by package name. /usr/bin/loginctl is provided by systemd;
+# naming the path keeps the requirement about the capability rather than about
+# one distribution's package layout.
+[package.metadata.generate-rpm.requires]
+"/usr/bin/loginctl" = "*"
+
+# Weak dependencies: dnf installs them by default, the user may remove them,
+# and an unresolvable one is silently ignored.
+#
+# The webcam entry is the important one. The daemon resolves its tool at
+# runtime -- fswebcam if present, otherwise ffmpeg (snapshot.rs). On Fedora,
+# /usr/bin/ffmpeg comes from ffmpeg-free in the Fedora repositories, while the
+# package literally named `ffmpeg` lives in RPM Fusion. Requiring the name
+# would force users onto a third-party repository; requiring the path does not.
+#
+# mesa-libGL and libxkbcommon are dlopen'ed by winit and glutin, so --auto-req
+# cannot see them and the GUI would otherwise declare no runtime dependency.
+[package.metadata.generate-rpm.recommends]
+fswebcam = "*"
+"/usr/bin/ffmpeg" = "*"
+"/usr/bin/paplay" = "*"
+mesa-libGL = "*"
+libxkbcommon = "*"

@@ -9,10 +9,12 @@
 # The system unit and the user unit go to *separate* directories on purpose.
 # cargo-deb scans one directory for systemd units and handles system units
 # only; a user unit found there would be installed and enabled system-wide.
+# cargo-generate-rpm does not scan at all — it takes an explicit asset list —
+# but the split costs nothing and keeps one staging layout for both formats.
 set -euo pipefail
 
-root="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
-stage="$root/target/deb-staging"
+root="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+stage="$root/target/pkg-staging"
 
 rm -rf "$stage"
 mkdir -p "$stage/system" "$stage/user" "$stage/sounds"
