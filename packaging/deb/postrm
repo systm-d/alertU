@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+purge)
+    # The daemon writes its config here; the package never shipped one.
+    rm -rf /etc/alertu
+
+    # Snapshots are deliberately kept. Debian policy would allow removing
+    # package-created data, but these are photographs of an intrusion —
+    # possibly the only record of an incident. Deleting them because someone
+    # uninstalled a program is the wrong trade.
+    if [ -d /var/lib/alertu/snapshots ]; then
+        echo "AlertU: alarm snapshots kept in /var/lib/alertu/snapshots — remove them yourself if you want them gone."
+    fi
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0
