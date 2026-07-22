@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}AlertU — {{ section.extra.tagline }}{% endblock title %}
+{% block content %}
+<header class="hero">
+  <div class="wrap">
+    <div class="topbar">
+      <span class="wordmark">alert<span class="u">U</span></span>
+      <nav class="langs" aria-label="{{ section.extra.langs_label }}">
+        <a{% if lang == 'en' %} class="on" aria-current="true"{% endif %} href="{{ get_url(path='@/_index.md', lang='en') }}" hreflang="en">EN</a>
+        <a{% if lang == 'fr' %} class="on" aria-current="true"{% endif %} href="{{ get_url(path='@/_index.md', lang='fr') }}" hreflang="fr">FR</a>
+      </nav>
+    </div>
+
+    <div class="hero__inner">
+      <img class="hero__logo" src="{{ get_url(path='logo.png') }}" width="512" height="512"
+           alt="{{ section.extra.logo_alt }}" />
+      <p class="eyebrow">{{ section.extra.eyebrow }}</p>
+      <h1>{{ section.extra.tagline }}</h1>
+      <p class="lede">{{ section.extra.lede }}</p>
+
+      <div class="cta">
+        <a class="button button--primary" href="#install">{{ section.extra.cta2 }}</a>
+        <a class="button" href="{{ config.extra.repo_url }}">{{ section.extra.cta }}</a>
+      </div>
+
+      <div class="term term--hero">
+        <div class="term__bar" aria-hidden="true"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">alertu-ctl</span></div>
+<pre><code><span class="p">$</span> alertu-ctl status
+<span class="s-idle">Idle</span>
+<span class="p">$</span> alertu-ctl toggle            <span class="dim"># {{ section.extra.term_toggle }}</span>
+ok
+<span class="p">$</span> alertu-ctl --json status --watch
+{"event":"state","state":"<span class="s-armed">armed</span>"}
+{"event":"state_changed","state":"<span class="s-trig">triggered</span>"}
+{"event":"state_changed","state":"<span class="s-alarm">alarm</span>"}</code></pre>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  {{ section.content | safe }}
+</main>
+{% endblock content %}
