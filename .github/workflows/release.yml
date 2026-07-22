@@ -105,6 +105,14 @@ jobs:
   rpm:
     name: Fedora package
     runs-on: ubuntu-latest
+    # Both jobs end in `gh release create ... || gh release upload ...`. Run in
+    # parallel, whichever finished first would publish a release carrying one of
+    # the two artefacts and notify every watcher of it. Serialising means the
+    # deb job creates the release and this one uploads into it. `needs` only
+    # orders the jobs; on a branch push, where neither attaches anything, the
+    # ordering is invisible, and if the deb job fails there is no half-published
+    # release to explain.
+    needs: deb
     steps:
       - uses: actions/checkout@v7
 
@@ -132,7 +140,11 @@ jobs:
             dnf install -y -q gcc rust cargo rpm-build \
               libxkbcommon-devel wayland-devel mesa-libGL-devel \
               libX11-devel libXcursor-devel libXrandr-devel libXi-devel
-            cargo install cargo-generate-rpm --locked
+            # Pinned. The asset field spellings (source/dest/mode) and the
+            # *_script field names in Cargo.toml were verified against 0.21;
+            # a 0.22 that renamed one would break the release at tag time, in
+            # the one workflow nobody runs before tagging.
+            cargo install cargo-generate-rpm --locked --version "~0.21"
             cargo build --release --locked
             ./packaging/stage.sh
             ~/.cargo/bin/cargo-generate-rpm -p crates/alertu-daemon --auto-req auto
@@ -141,15 +153,30 @@ jobs:
           echo "rpm=$rpm" >> "$GITHUB_ENV"
           echo "produced $rpm"
 
+      # The glibc gate is not decoration. This job builds with Fedora's own
+      # rustc (`dnf install rust cargo`) rather than the pinned toolchain the
+      # deb job uses, so a std that references one more symbol version silently
+      # raises the floor -- and README.md and README.Fedora both promise Fedora
+      # 40 or newer, derived from GLIBC_2.39. Nothing else would notice until a
+      # Fedora 40 user hit an unresolvable dependency.
+      #
+      # `-e rpm` forwards the host variable the build step wrote to $GITHUB_ENV,
+      # so the path is expanded inside the container rather than spliced into
+      # the script text.
       - name: Show what was produced
         run: |
-          docker run --rm -v "$PWD":/w -w /w fedora:43 bash -c "
-            rpm -qpl '$rpm'
-            rpm -qp --requires '$rpm'
-            rpm -qp --recommends '$rpm'
-            rpm -qp --requires '$rpm' | grep -q 'libc\.so\.6' || {
-              echo 'Requires lost its --auto-req resolution' >&2; exit 1; }
-          "
+          docker run --rm -v "$PWD":/w -w /w -e rpm fedora:43 bash -c '
+            set -e
+            rpm -qpl "$rpm"
+            rpm -qp --requires "$rpm"
+            rpm -qp --recommends "$rpm"
+            rpm -qp --requires "$rpm" | grep -q "libc\.so\.6" || {
+              echo "Requires lost its --auto-req resolution" >&2; exit 1; }
+            max=$(rpm -qp --requires "$rpm" | grep -o "GLIBC_[0-9.]*" | sort -uV | tail -1)
+            [ "$max" = GLIBC_2.39 ] || {
+              echo "glibc floor moved to $max: update README.md and README.Fedora" >&2; exit 1; }
+            echo "glibc floor $max"
+          '
 
       # A package that builds but does not install is worthless, and that is
       # only discovered by trying. systemd as PID 1 so the unit is genuinely
@@ -157,19 +184,66 @@ jobs:
       # scriptlets' $1 semantics fail silently and nothing else catches them.
       - name: Install, upgrade and remove it
         run: |
-          docker run -d --name rpmtest --privileged \
-            -v "$PWD/target/generate-rpm":/rpms:ro fedora:43 /usr/sbin/init
-          sleep 5
+          # The stock fedora:43 image has no systemd at all -- no /usr/sbin/init,
+          # no systemctl, `rpm -q systemd` says it is not installed -- so it
+          # cannot be run as PID 1 and every command below would die. Install it.
+          printf 'FROM fedora:43\nRUN dnf install -y systemd procps-ng && dnf clean all\nCMD ["/usr/sbin/init"]\n' > /tmp/sysd.Dockerfile
+          docker build -t fedora43-systemd -f /tmp/sysd.Dockerfile /tmp
+          docker run -d --name rpmtest --privileged --cgroupns=host \
+            -v "$PWD/target/generate-rpm":/rpms:ro fedora43-systemd
+
+          # Wait for PID 1 to finish booting rather than guessing at a sleep.
+          # `degraded` is normal in a container (units that want real hardware
+          # fail); only `running` and `degraded` mean the manager is answering.
+          for _ in $(seq 1 60); do
+            state=$(docker exec rpmtest systemctl is-system-running 2>/dev/null || true)
+            case "$state" in running | degraded) break ;; esac
+            sleep 1
+          done
+          echo "systemd is $state"
+          case "$state" in running | degraded) ;; *) docker logs rpmtest; exit 1 ;; esac
+
           docker exec rpmtest bash -c 'dnf install -y /rpms/*.rpm'
           docker exec rpmtest bash -c 'alertu-ctl --version'
+
+          # The branch's most-repeated claim -- "unlike the .deb, the package
+          # does not start the daemon" -- is in README.md, README.Fedora and the
+          # %post message, and without this line nothing tests it: swapping
+          # `systemctl preset` for `enable --now` in post_install.sh would leave
+          # this job green. `is-enabled` exits non-zero on a disabled unit, so
+          # the `!` makes the whole command succeed only while it stays that
+          # way, and docker exec passes the code straight out to `bash -e`.
+          docker exec rpmtest bash -c '! systemctl is-enabled --quiet alertu-daemon'
+
+          # The example config and the licence must survive the tsflags=nodocs
+          # that Fedora's own container and cloud images set, because the %post
+          # message points at the first of them.
+          docker exec rpmtest bash -c 'test -f /usr/share/doc/alertu/config.example.toml'
+          docker exec rpmtest bash -c 'test -f /usr/share/licenses/alertu/LICENSE'
+
           docker exec rpmtest bash -c 'systemctl enable --now alertu-daemon'
           docker exec rpmtest bash -c 'sleep 2; systemctl is-active --quiet alertu-daemon' \
             || { docker exec rpmtest journalctl -u alertu-daemon --no-pager -n 50; exit 1; }
           docker exec rpmtest bash -c 'test -S /run/alertu/alertu.sock'
+
+          # The daemon runs under ProtectSystem=strict with /etc/alertu as one
+          # of the few writable paths; if that ever stops being true it saves
+          # nothing and says so only in its log. Write through the running
+          # daemon, not with a shell, so the unit's sandbox is what is tested.
+          docker exec rpmtest bash -c 'printf "grace_period_secs = 42\n" | alertu-ctl set-config -'
+          docker exec rpmtest bash -c 'grep -q "grace_period_secs = 42" /etc/alertu/config.toml'
+
+          # Something for `dnf remove` to spare. Snapshots are webcam stills
+          # from real alarms: losing them on an uninstall would be data loss.
+          docker exec rpmtest bash -c 'mkdir -p /var/lib/alertu/snapshots && touch /var/lib/alertu/snapshots/keep.jpg'
+
           docker exec rpmtest bash -c 'dnf reinstall -y /rpms/*.rpm'
           docker exec rpmtest bash -c 'sleep 2; systemctl is-active --quiet alertu-daemon' \
             || { echo "the daemon did not survive an upgrade: check the \$1 guards" >&2; exit 1; }
+
           docker exec rpmtest bash -c 'dnf remove -y alertu'
+          # Neither path is in the manifest, so removal must leave both behind.
+          docker exec rpmtest bash -c 'test -f /var/lib/alertu/snapshots/keep.jpg && test -d /etc/alertu'
           docker rm -f rpmtest
 
       - uses: actions/upload-artifact@v4

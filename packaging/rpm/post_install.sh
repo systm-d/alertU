@@ -6,15 +6,33 @@ set -e
 # The service account and its input/video groups. Shipped as a sysusers.d
 # fragment so systemd owns the definition; this applies it now instead of
 # waiting for the next boot.
+#
+# The Debian postinst wraps the same call in `[ -x /usr/bin/systemd-sysusers ]`.
+# That guard is deliberately absent here, for two reasons: this package carries
+# `Requires: /usr/bin/loginctl`, so RPM will not let it install without the
+# systemd package that also owns /usr/bin/systemd-sysusers; and the trailing
+# `|| true` already absorbs the 127 a missing binary would produce, so the
+# guard would change nothing even if the requirement were dropped.
 systemd-sysusers /usr/lib/sysusers.d/alertu.conf >/dev/null 2>&1 || true
 
 # No config file is shipped: anything under /etc would be a packaged config
 # file, and the daemon rewrites this one whenever the tray or the CLI saves
 # settings. It creates the file itself on first use; we only provide a
 # directory it is allowed to write to.
-mkdir -p /etc/alertu
-chown alertu:alertu /etc/alertu 2>/dev/null || true
-chmod 0755 /etc/alertu
+#
+# RPM downgrades a failing %post to a warning and commits the transaction
+# anyway, so nothing here may abort the script: an unguarded failure on any of
+# these three lines would skip `systemctl preset` and the whole first-use
+# message below, and the install would still be reported as successful. The
+# chown is the one that matters -- if it fails, /etc/alertu stays root:root,
+# the daemon starts fine, and the user only finds out when a setting saved
+# from the tray, the settings window or `alertu-ctl set-config` vanishes on
+# restart. So say so, loudly, rather than hiding it behind `2>/dev/null`.
+mkdir -p /etc/alertu || :
+if ! chown alertu:alertu /etc/alertu; then
+    echo "alertu: could not set ownership of /etc/alertu; the daemon will not be able to save its configuration" >&2
+fi
+chmod 0755 /etc/alertu || :
 
 systemctl daemon-reload >/dev/null 2>&1 || true
 
