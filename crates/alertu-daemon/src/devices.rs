@@ -94,13 +94,21 @@ pub struct Resolved {
 ///   excluded from the watch set.
 pub fn resolve(cfg: &Config, entries: &[DeviceEntry]) -> Resolved {
     let (remote, remote_name) = if cfg.remote_is_auto() {
-        let hint = cfg.remote_name_hint.to_lowercase();
-        match entries
-            .iter()
-            .find(|e| e.name.to_lowercase().contains(&hint))
-        {
-            Some(e) => (Some(e.path.clone()), Some(e.name.clone())),
-            None => (None, None),
+        let hint = cfg.remote_name_hint.trim().to_lowercase();
+        // An empty hint matches *everything* — `contains("")` is always true —
+        // which would silently pick whichever device happens to enumerate
+        // first. There is no sensible default remote, so with no hint we
+        // resolve nothing and let the caller warn.
+        if hint.is_empty() {
+            (None, None)
+        } else {
+            match entries
+                .iter()
+                .find(|e| e.name.to_lowercase().contains(&hint))
+            {
+                Some(e) => (Some(e.path.clone()), Some(e.name.clone())),
+                None => (None, None),
+            }
         }
     } else {
         let path = PathBuf::from(&cfg.remote_device);
@@ -147,8 +155,8 @@ mod tests {
 
     fn sample() -> Vec<DeviceEntry> {
         vec![
-            entry("/dev/input/event0", "AB Shutter 3", true, false),
-            entry("/dev/input/event1", "Logitech USB Mouse", false, true),
+            entry("/dev/input/event0", "Some Bluetooth Remote", true, false),
+            entry("/dev/input/event1", "Some USB Mouse", false, true),
             entry(
                 "/dev/input/event2",
                 "AT Translated Set 2 keyboard",
@@ -160,11 +168,43 @@ mod tests {
 
     #[test]
     fn auto_resolves_remote_by_hint_and_watches_the_rest() {
-        let cfg = Config::default(); // hint "AB Shutter", watch auto
+        let cfg = Config {
+            remote_name_hint: "bluetooth remote".into(),
+            ..Config::default()
+        };
         let r = resolve(&cfg, &sample());
         assert_eq!(r.remote, Some(PathBuf::from("/dev/input/event0")));
         // Pointer (mouse) and the remote itself are excluded.
         assert_eq!(r.watch, vec![PathBuf::from("/dev/input/event2")]);
+    }
+
+    /// No hint means no remote — never "whichever device came first".
+    /// `contains("")` is true for every name, so the obvious implementation
+    /// would silently bind the toggle to an arbitrary device.
+    #[test]
+    fn an_empty_hint_resolves_no_remote() {
+        for hint in ["", "   "] {
+            let cfg = Config {
+                remote_name_hint: hint.into(),
+                ..Config::default()
+            };
+            let r = resolve(&cfg, &sample());
+            assert_eq!(r.remote, None, "hint {hint:?} should resolve nothing");
+            // Everything non-pointer is still watched.
+            assert_eq!(
+                r.watch,
+                vec![
+                    PathBuf::from("/dev/input/event0"),
+                    PathBuf::from("/dev/input/event2")
+                ]
+            );
+        }
+    }
+
+    /// The shipped default must not name anyone's hardware.
+    #[test]
+    fn the_default_config_names_no_device() {
+        assert!(Config::default().remote_name_hint.trim().is_empty());
     }
 
     #[test]

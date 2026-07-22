@@ -303,9 +303,18 @@ impl Machine {
                 name = resolved.remote_name.as_deref().unwrap_or("?"),
                 "remote resolved"
             ),
+            // No model is assumed, so a fresh install genuinely has no remote
+            // until someone names one. Say which of the two cases this is, and
+            // what to do about it, rather than only reporting the symptom.
+            None if self.cfg.remote_name_hint.trim().is_empty() => warn!(
+                "no remote configured; remote toggle unavailable. \
+                 Run `alertu-ctl list-devices`, then set `remote_name_hint` to \
+                 part of your remote's name (or `remote_device` to its path)"
+            ),
             None => warn!(
                 hint = %self.cfg.remote_name_hint,
-                "no remote device resolved; remote toggle unavailable"
+                "no input device matched the configured hint; remote toggle \
+                 unavailable. Check `alertu-ctl list-devices`"
             ),
         }
 

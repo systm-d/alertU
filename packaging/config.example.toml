@@ -7,19 +7,35 @@
 # The GUI can edit and persist this file live over the IPC socket.
 
 # --- Remote ("key fob") -----------------------------------------------------
+#
+# Nothing here is tied to a particular model. Any USB or Bluetooth device that
+# shows up as a standard HID node works; you tell AlertU which one, and which
+# of its buttons.
+#
+# To find yours, start the daemon and run:
+#
+#     alertu-ctl list-devices
+#
+# then press a button and watch the daemon's log at RUST_LOG=debug to see which
+# device and which key it emits.
 
 # evdev path of the remote, or "auto" to match by name.
 remote_device = "auto"
 
 # When remote_device = "auto", the first device whose name contains this
-# substring (case-insensitive) is used. The reference device is the AB Shutter 3.
-remote_name_hint = "AB Shutter"
+# substring (case-insensitive) is used.
+#
+# Empty means *no remote*, not "pick the first one" — an empty substring would
+# match every device, so AlertU deliberately resolves nothing instead of binding
+# your toggle to whatever enumerated first. Fill it in with any distinctive part
+# of your device's name.
+remote_name_hint = ""
 
-# evdev key name(s) that arm/disarm. The AB Shutter 3 sends KEY_VOLUMEUP or
-# KEY_ENTER depending on its iOS/Android mode; any listed key acts as the toggle.
-# Use any name evdev knows, e.g. KEY_PLAYPAUSE, KEY_SPACE, BTN_0 — nothing is
-# hardcoded to a specific model.
-toggle_keys = ["KEY_VOLUMEUP", "KEY_ENTER"]
+# evdev key name(s) that arm/disarm; any listed key acts as the toggle.
+# Use any name evdev knows — KEY_ENTER, KEY_VOLUMEUP, KEY_RIGHT, KEY_PLAYPAUSE,
+# BTN_0… Presentation clickers commonly send KEY_RIGHT / KEY_LEFT; cheap
+# Bluetooth shutters commonly send KEY_VOLUMEUP or KEY_ENTER.
+toggle_keys = ["KEY_ENTER"]
 
 # --- Intrusion watch --------------------------------------------------------
 

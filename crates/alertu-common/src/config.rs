@@ -20,7 +20,12 @@ pub struct Config {
     pub remote_device: String,
 
     /// Substring matched (case-insensitive) against device names when
-    /// `remote_device = "auto"`. Defaults to the AB Shutter 3 reference device.
+    /// `remote_device = "auto"`.
+    ///
+    /// Empty by default: no model is assumed, and an empty hint deliberately
+    /// resolves *nothing* rather than the first device that enumerates. Find
+    /// yours with `alertu-ctl list-devices` and use any distinctive part of its
+    /// name.
     pub remote_name_hint: String,
 
     /// evdev key name that arms/disarms, e.g. `KEY_VOLUMEUP` or `KEY_ENTER`.
@@ -68,8 +73,8 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             remote_device: AUTO.to_string(),
-            remote_name_hint: "AB Shutter".to_string(),
-            toggle_keys: vec!["KEY_VOLUMEUP".to_string(), "KEY_ENTER".to_string()],
+            remote_name_hint: String::new(),
+            toggle_keys: vec!["KEY_ENTER".to_string()],
             watch_devices: vec![AUTO.to_string()],
             grace_period_secs: 15,
             alarm_delay_secs: 10,

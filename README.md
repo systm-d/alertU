@@ -45,12 +45,27 @@ Idle ─────────────────────────
 
 ### Generic remote support
 
-Nothing is hardcoded to a specific model. Any USB/Bluetooth device that shows up
-as a standard HID node under `/dev/input/eventX` works — you pick the remote and
-the watched devices from the tray. The reference device is an **AB Shutter 3**
-(AIROHA AB1126A) that enumerates as a keyboard sending `KEY_VOLUMEUP` or
-`KEY_ENTER`, but `toggle_keys` accepts any evdev key name, resolved generically
-via evdev's `KeyCode` name table.
+Nothing is hardcoded to a specific model, and no model is assumed by default.
+Any USB or Bluetooth device that shows up as a standard HID node under
+`/dev/input/eventX` works — a presentation clicker, a cheap Bluetooth camera
+shutter, a spare keyboard. You pick the remote and the watched devices from the
+tray, or in the config.
+
+`toggle_keys` accepts any evdev key name, resolved through evdev's `KeyCode`
+table, so whatever your device happens to send is fair game.
+
+To find yours:
+
+```sh
+alertu-ctl list-devices                 # what the daemon can see
+sudo journalctl -u alertu-daemon -f     # then press a button, at RUST_LOG=debug
+```
+
+`remote_name_hint` is **empty by default, and that means "no remote"** rather
+than "pick the first one": an empty substring matches every device, so AlertU
+resolves nothing instead of silently binding your toggle to whichever node
+enumerated first. Until you name a device, the daemon says so in its log and the
+remote toggle is simply unavailable — everything else still works.
 
 ## Architecture
 
@@ -109,7 +124,10 @@ install  -Dm755 target/release/alertu-settings      ~/.local/bin/alertu-settings
 sudo systemd-sysusers packaging/sysusers.d/alertu.conf
 # (equivalent one-liner: sudo useradd --system --groups input,video alertu)
 
-sudo install -Dm644 packaging/config.example.toml /etc/alertu/config.toml
+# Owned by the daemon: `SetConfig` persists, so the tray's device picker, the
+# settings window and `alertu-ctl set-config` all write this file back.
+sudo install -Dm644 -o alertu -g alertu packaging/config.example.toml /etc/alertu/config.toml
+sudo chown alertu:alertu /etc/alertu
 sudo install -Dm644 packaging/alertu-daemon.service /etc/systemd/system/alertu-daemon.service
 
 # Before starting the daemon, so its first arm does not chirp into missing files.
