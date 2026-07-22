@@ -1,4 +1,96 @@
-AlertU on Fedora
-================
+AlertU for Fedora
+==================
 
-See /usr/share/doc/alertu/config.example.toml for the configuration reference.
+Which releases this package installs on
+----------------------------------------
+
+Fedora 40 or newer. The glibc floor is GLIBC_2.39, measured from the
+`GLIBC_*` symbol versions the four binaries actually reference (`rpm -qp
+--requires`, resolved by `--auto-req` against `find-requires`), not asserted
+by hand — that number happens to match the `.deb`'s `libc6 (>= 2.39)` floor,
+but the two are reached by different mechanisms: the deb's is a single
+package-version floor taken from its build toolchain, this one is the highest
+individual symbol version any binary links against. Fedora 39 and older will
+fail to install. Build from source there.
+
+If you installed manually before
+---------------------------------
+
+The manual instructions put a unit in /etc/systemd/system and binaries in
+/usr/local/bin. Both take precedence over this package's — the unit shadows
+/usr/lib/systemd/system/alertu-daemon.service, and /usr/local/bin comes before
+/usr/bin on PATH — so the package looks installed while the old build keeps
+running. `dnf remove` removes neither. Clear them out before installing:
+
+    sudo systemctl disable --now alertu-daemon
+    sudo rm -f /etc/systemd/system/alertu-daemon.service
+    sudo rm -f /usr/local/bin/alertu-daemon /usr/local/bin/alertu-ctl
+    rm -f ~/.local/bin/alertu-gui ~/.local/bin/alertu-settings
+    rm -f ~/.config/systemd/user/alertu-gui.service
+
+Four things this package deliberately does not do.
+----------------------------------------------------
+
+It does not start the daemon.
+------------------------------
+
+`%post` runs `systemctl preset alertu-daemon.service` rather than
+`systemctl enable --now`, because honouring the administrator's preset policy
+is the Fedora convention — a maintainer script that force-enables a unit
+overrides a choice the administrator may have made on purpose. Fedora's
+default preset policy ends with `disable *`, so on a stock system this leaves
+the daemon installed but not running. This is a deliberate divergence from
+the `.deb`, which does start its daemon. Start it yourself:
+
+    sudo systemctl enable --now alertu-daemon
+
+It does not start the tray for you.
+-----------------------------------
+
+The tray is the primary way to use AlertU, but its unit is a *user* unit, and
+a system-level maintainer script has no business writing to your systemd user
+instance — a user-preset fragment would only apply to instances created after
+installation, which is not the one you are logged into. So, once per user:
+
+    systemctl --user enable --now alertu-gui
+
+Without it the daemon runs and `alertu-ctl` works, but nothing appears in the
+system tray.
+
+It does not add you to the `alertu` group.
+-----------------------------------------
+
+The daemon's control socket is mode 0660, owned by `alertu`. Anyone who can
+connect to it can disarm the alarm, read the configuration including the
+webhook URL, and redirect the paths handed to the helper programs. Group
+membership is therefore a privilege grant, not a convenience.
+
+A package cannot grant it: it does not know which account is yours, and RPM
+scriptlets have no business modifying existing accounts non-interactively. So:
+
+    sudo usermod -aG alertu <user>
+
+then log out and back in. Without it, the tray, the settings window and
+alertu-ctl will all fail to connect.
+
+It does not ship a configuration file.
+--------------------------------------
+
+The daemon rewrites its configuration whenever you change a setting from the
+tray, the settings window or `alertu-ctl set-config`. A file under /etc would
+be an RPM-tracked config file, and `dnf` would flag it as modified on every
+upgrade once the daemon had touched it.
+
+Instead the package creates /etc/alertu/ empty and lets the daemon write
+config.toml there itself. A commented example is in this directory. The
+daemon starts on built-in defaults, with no remote configured, and says so in
+its log.
+
+Removing the package
+---------------------
+
+`dnf remove` spares /etc/alertu — nothing under it is owned by the package,
+so removal leaves your configuration in place.
+
+It also spares /var/lib/alertu/snapshots. Those are webcam stills from alarms
+you may still want. Remove both by hand if you don't.

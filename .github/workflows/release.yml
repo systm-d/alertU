@@ -101,3 +101,89 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" "$deb" --generate-notes ||
             gh release upload "$GITHUB_REF_NAME" "$deb" --clobber
+
+  rpm:
+    name: Fedora package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # A tag that disagrees with Cargo.toml would produce a package labelled
+      # with one version and containing another.
+      - name: Check the tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$crate" != "$tag" ]; then
+            echo "tag $tag does not match Cargo.toml version $crate" >&2
+            exit 1
+          fi
+          echo "version $crate"
+
+      # Built inside Fedora on purpose. --auto-req shells out to
+      # /usr/lib/rpm/find-requires and resolves against the local RPM database;
+      # on Ubuntu it would silently produce a package that claims to need
+      # nothing. The Debian branch shipped exactly that failure in reverse.
+      - name: Build and package inside Fedora
+        run: |
+          docker run --rm -v "$PWD":/w -w /w fedora:43 bash -c '
+            set -eux
+            dnf install -y -q gcc rust cargo rpm-build \
+              libxkbcommon-devel wayland-devel mesa-libGL-devel \
+              libX11-devel libXcursor-devel libXrandr-devel libXi-devel
+            cargo install cargo-generate-rpm --locked
+            cargo build --release --locked
+            ./packaging/stage.sh
+            ~/.cargo/bin/cargo-generate-rpm -p crates/alertu-daemon --auto-req auto
+          '
+          rpm=$(ls target/generate-rpm/*.rpm)
+          echo "rpm=$rpm" >> "$GITHUB_ENV"
+          echo "produced $rpm"
+
+      - name: Show what was produced
+        run: |
+          docker run --rm -v "$PWD":/w -w /w fedora:43 bash -c "
+            rpm -qpl '$rpm'
+            rpm -qp --requires '$rpm'
+            rpm -qp --recommends '$rpm'
+            rpm -qp --requires '$rpm' | grep -q 'libc\.so\.6' || {
+              echo 'Requires lost its --auto-req resolution' >&2; exit 1; }
+          "
+
+      # A package that builds but does not install is worthless, and that is
+      # only discovered by trying. systemd as PID 1 so the unit is genuinely
+      # enabled and started, and so the upgrade path is exercised -- the RPM
+      # scriptlets' $1 semantics fail silently and nothing else catches them.
+      - name: Install, upgrade and remove it
+        run: |
+          docker run -d --name rpmtest --privileged \
+            -v "$PWD/target/generate-rpm":/rpms:ro fedora:43 /usr/sbin/init
+          sleep 5
+          docker exec rpmtest bash -c 'dnf install -y /rpms/*.rpm'
+          docker exec rpmtest bash -c 'alertu-ctl --version'
+          docker exec rpmtest bash -c 'systemctl enable --now alertu-daemon'
+          docker exec rpmtest bash -c 'sleep 2; systemctl is-active --quiet alertu-daemon' \
+            || { docker exec rpmtest journalctl -u alertu-daemon --no-pager -n 50; exit 1; }
+          docker exec rpmtest bash -c 'test -S /run/alertu/alertu.sock'
+          docker exec rpmtest bash -c 'dnf reinstall -y /rpms/*.rpm'
+          docker exec rpmtest bash -c 'sleep 2; systemctl is-active --quiet alertu-daemon' \
+            || { echo "the daemon did not survive an upgrade: check the \$1 guards" >&2; exit 1; }
+          docker exec rpmtest bash -c 'dnf remove -y alertu'
+          docker rm -f rpmtest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alertu-rpm
+          path: ${{ env.rpm }}
+
+      # `upload` requires a release to exist already, which it does not when the
+      # tag was pushed with plain `git tag && git push --tags`. Create it if
+      # missing, fall back to uploading into one made by hand or by the UI.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$rpm" --generate-notes ||
+            gh release upload "$GITHUB_REF_NAME" "$rpm" --clobber
