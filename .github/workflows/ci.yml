@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push supersedes an in-flight run for the same ref. Finishing a check
+# on a commit nobody will look at again just occupies a runner.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -13,7 +19,7 @@ jobs:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -24,24 +30,33 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       # alertu-settings builds eframe, which needs the X11/Wayland/GL headers.
+      # Everything else in the workspace is pure Rust: the tray speaks D-Bus via
+      # zbus (not libdbus), and audio, capture and webhooks shell out.
       - name: Install eframe build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
 
       - name: Format
         run: cargo fmt --all --check
 
+      # `--locked` throughout: a stale Cargo.lock should fail the build rather
+      # than be silently updated, so CI tests the dependency set the repository
+      # actually pins.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features --locked
 
-      # `alertu-common`'s `ipc-client` tests are feature-gated; plain
-      # `--workspace` only compiles them because other crates happen to enable
-      # the feature and cargo unifies. Exercise them on their own terms.
-      - name: Test (all features)
-        run: cargo test --workspace --all-features
+      # The one thing a workspace-wide command cannot check: `alertu-daemon`
+      # must build without `alertu-common`'s `ipc-client` feature. Any
+      # `--workspace` invocation enables it regardless, because `alertu-ctl` and
+      # `alertu-settings` depend on it and cargo unifies features across the
+      # graph — which is also why running the suite a second time without
+      # `--all-features` proved nothing and has been dropped. Only a
+      # single-package build resolves features in isolation.
+      - name: Daemon builds without the ipc-client feature
+        run: cargo build -p alertu-daemon --locked
