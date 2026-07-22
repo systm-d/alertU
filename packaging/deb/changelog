@@ -1,3 +1,13 @@
+alertu (0.2.0-1) unstable; urgency=medium
+
+  * No change to the Debian package itself. This release adds a Fedora RPM
+    built from the same sources, so the staging script that rewrites unit
+    paths and generates the sounds now lives at packaging/stage.sh and writes
+    to target/pkg-staging rather than target/deb-staging.
+  * The release workflow builds, installs and verifies both packages.
+
+ -- Kevin Delfour <kevin@delfour.co>  Wed, 22 Jul 2026 19:40:00 +0200
+
 alertu (0.1.0-1) unstable; urgency=medium
 
   * Initial Debian package.
