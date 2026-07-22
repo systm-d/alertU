@@ -113,6 +113,23 @@ egui/eframe links against X11/Wayland/GL — see the `apt-get install` list in
 Skip it with `cargo build --release --workspace --exclude alertu-settings` if you
 would rather not install them.
 
+### Debian and Ubuntu
+
+A `.deb` is attached to each [release](https://github.com/systm-d/alertU/releases):
+
+```sh
+sudo apt install ./alertu.deb
+sudo usermod -aG alertu "$USER"   # then log out and back in
+```
+
+The package installs all four binaries, the systemd units, the sounds and the
+desktop entry, and starts the daemon. It deliberately ships no configuration
+file — the daemon writes its own on first use — and it cannot add you to the
+`alertu` group, which is why that second line is not optional. See
+`/usr/share/doc/alertu/README.Debian`.
+
+Building from source, on any distribution:
+
 ## Install (systemd)
 
 ```sh
