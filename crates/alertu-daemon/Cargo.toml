@@ -44,3 +44,56 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+# Debian packaging. It lives in this crate's manifest because cargo-deb packages
+# one crate, while AlertU's four binaries live in four — so this one manifest
+# carries the whole project's packaging configuration, and `name` renames the
+# result from "alertu-daemon" to "alertu". A wart, chosen over adding an empty
+# metapackage crate purely for cosmetics.
+#
+# Paths are relative to this manifest's directory.
+[package.metadata.deb]
+name = "alertu"
+maintainer = "Kevin Delfour <kevin@delfour.co>"
+license-file = ["../../LICENSE", "0"]
+extended-description = """
+A cheap USB or Bluetooth HID remote becomes the key fob for a Linux desktop.
+Click to arm: the session locks. Activity on a watched input device then starts
+a countdown, a siren, a timestamped webcam still and an optional webhook.
+A personal gadget, not an anti-theft system."""
+section = "utils"
+priority = "optional"
+depends = "$auto, systemd"
+recommends = "ffmpeg | fswebcam, pulseaudio-utils | alsa-utils"
+assets = [
+    ["../../target/release/alertu-daemon",   "usr/bin/",  "755"],
+    ["../../target/release/alertu-ctl",      "usr/bin/",  "755"],
+    ["../../target/release/alertu-gui",      "usr/bin/",  "755"],
+    ["../../target/release/alertu-settings", "usr/bin/",  "755"],
+    ["../../target/deb-staging/user/alertu-gui.service", "usr/lib/systemd/user/", "644"],
+    ["../../target/deb-staging/sounds/*.wav", "usr/share/sounds/alertu/", "644"],
+    ["../../packaging/sysusers.d/alertu.conf", "usr/lib/sysusers.d/", "644"],
+    ["../../packaging/alertu-settings.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/icons/hicolor/48x48/apps/alertu.png",   "usr/share/icons/hicolor/48x48/apps/",   "644"],
+    ["../../packaging/icons/hicolor/64x64/apps/alertu.png",   "usr/share/icons/hicolor/64x64/apps/",   "644"],
+    ["../../packaging/icons/hicolor/128x128/apps/alertu.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
+    ["../../packaging/icons/hicolor/256x256/apps/alertu.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["../../packaging/icons/hicolor/512x512/apps/alertu.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    ["../../packaging/config.example.toml", "usr/share/doc/alertu/", "644"],
+    ["../../packaging/deb/README.Debian",   "usr/share/doc/alertu/", "644"],
+]
+maintainer-scripts = "../../packaging/deb"
+
+# `unit-name` is required: units are matched as `<unit>.<suffix>`, and our file
+# is alertu-daemon.service while the package is alertu, so the default
+# `<package>.<suffix>` pattern would match nothing.
+#
+# `unit-scripts` points at the system-only staging directory. cargo-deb handles
+# system units only; the user unit is shipped through `assets` above and must
+# never appear here.
+[package.metadata.deb.systemd-units]
+unit-name = "alertu-daemon"
+unit-scripts = "../../target/deb-staging/system"
+enable = true
+start = true
+restart-after-upgrade = true
