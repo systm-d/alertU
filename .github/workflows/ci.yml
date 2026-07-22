@@ -60,3 +60,30 @@ jobs:
       # single-package build resolves features in isolation.
       - name: Daemon builds without the ipc-client feature
         run: cargo build -p alertu-daemon --locked
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The `rust-version` declared in Cargo.toml is a promise. Checking it here
+      # keeps it honest: without this, it is just a number nobody verifies.
+      # `rust-toolchain.toml` pins stable for developers, so it is overridden.
+      - name: Install the minimum supported Rust version
+        run: |
+          rustup toolchain install 1.88 --profile minimal
+          rustup override set 1.88
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install eframe build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - name: Check
+        run: cargo check --workspace --all-targets --all-features --locked

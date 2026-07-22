@@ -4,6 +4,9 @@
 
 # AlertU
 
+[![CI](https://github.com/systm-d/alertU/actions/workflows/ci.yml/badge.svg)](https://github.com/systm-d/alertU/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A Linux re-imagining of the old Mac **iAlertU**: a cheap USB/Bluetooth HID remote
 becomes the "key fob" for a car-alarm-style guard on your computer. Click to arm
 (the session locks with a chirp); anyone who touches the keyboard or mouse while
