@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AlertU — Lock your machine. Stay in control.</title>
+    <meta name="description" content="Lock your machine. Stay in control. A Linux CLI that turns any USB&#x2F;Bluetooth remote into a car-alarm for your computer." />
+    <meta name="theme-color" content="#04070c" />
+    <meta property="og:title" content="AlertU" />
+    <meta property="og:description" content="Lock your machine. Stay in control. A Linux CLI that turns any USB&#x2F;Bluetooth remote into a car-alarm for your computer." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://systm-d.github.io/alertU/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="https://systm-d.github.io/alertU/favicon.png" />
+    <link rel="stylesheet" href="https://systm-d.github.io/alertU/syntax.css" />
+    <link rel="stylesheet" href="https://systm-d.github.io/alertU/main.css" />
+  </head>
+  <body>
+    <div class="glow" aria-hidden="true"></div>
+    
+<header class="hero">
+  <div class="wrap">
+    <div class="topbar">
+      <span class="wordmark">alert<span class="u">U</span></span>
+      <nav class="langs" aria-label="Language">
+        <a class="on" aria-current="true" href="https://systm-d.github.io/alertU/" hreflang="en">EN</a>
+        <a href="https://systm-d.github.io/alertU/fr/" hreflang="fr">FR</a>
+      </nav>
+    </div>
+
+    <div class="hero__inner">
+      <img class="hero__logo" src="https://systm-d.github.io/alertU/logo.png" width="512" height="512"
+           alt="The AlertU logo: a neon shield in a green-to-cyan gradient, a red alarm bell inside it, red signal waves rising above." />
+      <p class="eyebrow">Linux · logind · evdev</p>
+      <h1>Lock your machine. Stay in control.</h1>
+      <p class="lede">A cheap USB or Bluetooth remote becomes the key fob for your Linux desktop. Click to arm: the session locks and a chirp plays. Touch the machine while it&#x27;s armed and a countdown starts — then a siren, a timestamped webcam still, and an optional webhook.</p>
+
+      <div class="cta">
+        <a class="button button--primary" href="#install">Install</a>
+        <a class="button" href="https:&#x2F;&#x2F;github.com&#x2F;systm-d&#x2F;alertU">View on GitHub</a>
+      </div>
+
+      <div class="term term--hero">
+        <div class="term__bar" aria-hidden="true"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">alertu-ctl</span></div>
+<pre><code><span class="p">$</span> alertu-ctl status
+<span class="s-idle">Idle</span>
+<span class="p">$</span> alertu-ctl toggle            <span class="dim"># exactly what a remote click does</span>
+ok
+<span class="p">$</span> alertu-ctl --json status --watch
+{"event":"state","state":"<span class="s-armed">armed</span>"}
+{"event":"state_changed","state":"<span class="s-trig">triggered</span>"}
+{"event":"state_changed","state":"<span class="s-alarm">alarm</span>"}</code></pre>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <section>
+<p class="eyebrow">How it works</p>
+<h2 id="four-states-one-key-fob">Four states, one key fob</h2>
+<p class="section__lede">One task in the daemon owns all mutable state and drives every transition from four multiplexed sources: input signals, session lock changes, IPC commands, and internal timers.</p>
+<ol class="flow">
+  <li class="s1"><p class="st"><span class="dot"></span>Idle</p><p>Disarmed. Nothing is watched.</p></li>
+  <li class="s2"><p class="st"><span class="dot"></span>Armed</p><p>A click on the remote locks the session with <code>loginctl lock-session</code> and plays a short chirp. Watched inputs go live after a grace period.</p></li>
+  <li class="s3"><p class="st"><span class="dot"></span>Triggered</p><p>Activity on a watched device starts an adjustable countdown, with a discreet warning tick.</p></li>
+  <li class="s4"><p class="st"><span class="dot"></span>Alarm</p><p>The countdown expired. The siren loops, a timestamped webcam still is saved, and the optional webhook fires.</p></li>
+</ol>
+<p class="flow-note"><strong>Disarming: whichever comes first wins.</strong> Another click on the remote, or a normal password unlock — read from logind's <code>LockedHint</code> over D-Bus in real time, falling back to polling <code>loginctl</code> when the bus is unavailable. Unlock during the countdown and everything resets to Idle.</p>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">What it is</p>
+<h2 id="small-local-and-honest-about-it">Small, local, and honest about it</h2>
+<div class="feats">
+  <div class="feat"><h3><span class="mark">◆</span> Any remote, any key</h3><p>Nothing is hardcoded to a model. Any USB or Bluetooth device that appears as a HID node under <code>/dev/input/eventX</code> works — a presentation clicker, a cheap Bluetooth shutter, a spare keyboard — and <code>toggle_keys</code> accepts any evdev key name.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> X11 and Wayland</h3><p>It only talks to logind, so there is no dependency on a compositor or a desktop environment. Linux with systemd is the whole requirement.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> Four binaries</h3><p>A privileged daemon, a StatusNotifierItem tray, a standalone egui settings window, and <code>alertu-ctl</code>. Every front end talks to the daemon over one local Unix socket, newline-delimited JSON.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> Entirely local</h3><p>No cloud, no telemetry, no account. The only thing that ever leaves the machine is the webhook you configure yourself — and it is empty by default.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> Pure Rust where it counts</h3><p>The tray uses <code>zbus</code>, not <code>libdbus</code>; no GTK, no Qt, no ALSA linkage. Audio, webcam capture and the webhook shell out to <code>paplay</code>/<code>ffplay</code>, <code>fswebcam</code>/<code>ffmpeg</code> and <code>curl</code>.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> Tested and MIT</h3><p>102 tests — unit tests plus integration tests that drive a real daemon over its socket with a fake <code>loginctl</code> — run on every push, alongside <code>rustfmt</code> and clippy with <code>-D warnings</code>.</p></div>
+</div>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">Your remote</p>
+<h2 id="there-is-no-default-remote-deliberately">There is no default remote — deliberately</h2>
+<p class="section__lede"><code>remote_name_hint</code> is empty out of the box, and empty means <em>no remote</em>, not "pick the first one". An empty substring would match every device, so AlertU resolves nothing rather than silently binding your toggle to whichever node enumerated first. Until you name a device, the daemon says so in its log and the remote toggle is simply unavailable — everything else still works.</p>
+<div class="term">
+<div class="term__bar" aria-hidden="true"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">finding your remote</span></div>
+<pre><code><span class="p">$</span> alertu-ctl list-devices
+/dev/input/event3  AT Translated Set 2 keyboard [keyboard]
+/dev/input/event5  Logitech USB Receiver [pointer]
+/dev/input/event9  BT Camera Shutter [keyboard]
+<p><span class="p">$</span> sudo journalctl -u alertu-daemon -f   <span class="dim"># press a button, at RUST_LOG=debug</span></code></pre></p>
+</div>
+<p class="flow-note">Then set <code>remote_name_hint = "shutter"</code> and <code>toggle_keys = ["KEY_VOLUMEUP"]</code> — from the tray, from the settings window, or with <code>alertu-ctl set-config</code>. Watched devices default to <code>["auto"]</code>: everything except the remote and the main mouse.</p>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">Command line</p>
+<h2 id="everything-the-tray-does-from-a-script">Everything the tray does, from a script</h2>
+<ul class="commands">
+  <li><code>alertu-ctl status</code><span>Idle, Armed, Triggered or Alarm</span></li>
+  <li><code>alertu-ctl status --watch</code><span>one line per state change, until interrupted</span></li>
+  <li><code>alertu-ctl arm</code><span>force-arm — locks the session</span></li>
+  <li><code>alertu-ctl disarm</code><span>force-disarm — unlocks it</span></li>
+  <li><code>alertu-ctl toggle</code><span>exactly what a remote click does</span></li>
+  <li><code>alertu-ctl get-config</code><span>the daemon's effective config, as TOML</span></li>
+  <li><code>alertu-ctl set-config c.toml</code><span>replace it (<code>-</code> reads stdin), validated locally first</span></li>
+  <li><code>alertu-ctl list-devices</code><span>the input devices the daemon can see</span></li>
+  <li><code>alertu-ctl gen-sounds --dir …</code><span>write the three default sound files</span></li>
+</ul>
+<p class="flow-note"><code>--json</code> prints the daemon's raw protocol response, so a watched transition arrives as <code>{"event":"state_changed","state":"armed"}</code> and stays distinguishable from the initial <code>state</code> snapshot. Exit codes: <code>0</code> success, <code>1</code> daemon or connection error, <code>2</code> usage error.</p>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">Scope</p>
+<h2 id="a-personal-gadget-not-an-anti-theft-system">A personal gadget, not an anti-theft system</h2>
+<div class="callout callout--alarm">
+<p>That is the project's own wording, and the site will not pretend otherwise. There is no binary anti-tampering. The control socket is <code>0660</code> in the daemon's group, and connecting to it is equivalent to full control of the alarm — disarming it, reading the config including the webhook URL, and <code>SetConfig</code>, which steers the paths handed to the helper programs. Treat group membership as a privilege grant, not a convenience.</p>
+<p>Alarm snapshots sit behind the same boundary: each still is written <code>0640</code> in that group, inside a <code>snapshot_dir</code> the daemon keeps at <code>0750</code> when it owns it. Deliberately not world-readable — a webcam photograph of whoever is at the machine, the owner included, has no business being. A directory the daemon does not own is left exactly as it is, with a warning, rather than re-permissioned.</p>
+</div>
+</section>
+<hr class="divider" />
+<section id="install">
+<p class="eyebrow">Install</p>
+<h2 id="built-from-source-today">Built from source, today</h2>
+<p class="section__lede">There is no released package yet — a Debian package is in progress. For now, build it and install the bundled systemd units. The full walkthrough, including the tray's user unit, the icons and the desktop entry, is in the <a href="https://github.com/systm-d/alertU#install-systemd">README</a>.</p>
+<div class="steps">
+  <div class="step">
+    <h3>1 · Build</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">git</span></span><span class="z-meta z-function-call z-arguments z-shell"> clone https://github.com/systm-d/alertU</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-support z-function z-cd z-shell">cd</span></span><span class="z-meta z-function-call z-arguments z-shell"> alertU</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">cargo</span></span><span class="z-meta z-function-call z-arguments z-shell"> build<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>release</span></span>
+</span></code></pre>
+<p>Needs a recent stable Rust toolchain. Only <code>alertu-settings</code> pulls in system build dependencies (egui links X11/Wayland/GL) — skip it with <code>--workspace --exclude alertu-settings</code>.</p>
+  </div>
+  <div class="step">
+    <h3>2 · Service account &amp; units</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> systemd-sysusers packaging/sysusers.d/alertu.conf</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> install<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>Dm644</span> packaging/alertu-daemon.service <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell">  /etc/systemd/system/alertu-daemon.service</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> alertu-ctl gen-sounds<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>dir</span> /usr/share/sounds/alertu</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> systemctl enable<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>now</span> alertu-daemon</span>
+</span></code></pre>
+<p>The daemon's own account is the one that needs <code>input</code> and <code>video</code>; yours needs neither.</p>
+  </div>
+  <div class="step">
+    <h3>3 · Join the socket's group</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> usermod<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>aG</span> alertu <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-variable z-other z-readwrite z-shell">USER</span></span><span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span>
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> then start a new session, or: newgrp alertu</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span></code></pre>
+<p>The socket is <code>0660</code>. Without that group the tray, the settings window and <code>alertu-ctl</code> all fail to connect.</p>
+  </div>
+  <div class="step">
+    <h3>4 · External helpers</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> snapshots: one of</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">fswebcam</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ffmpeg</span></span>
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> audio: one of</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">paplay</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">pw-play</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">aplay</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ffplay</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">play</span></span>
+</span></code></pre>
+<p>AlertU shells out to these rather than linking them, so pick whichever your distribution already ships.</p>
+  </div>
+</div>
+<p class="callout"><strong>A Linux re-imagining of the old Mac iAlertU.</strong> MIT licensed, built in the open at <a href="https://github.com/systm-d/alertU">systm-d/alertU</a>. Configuration lives in <code>/etc/alertu/config.toml</code>, and every field is documented inline in <a href="https://github.com/systm-d/alertU/blob/main/packaging/config.example.toml"><code>packaging/config.example.toml</code></a>.</p>
+</section>
+
+</main>
+
+    <footer>
+      
+      100% local <span class="sep">·</span> Linux + systemd <span class="sep">·</span> MIT
+      
+      <span class="sep">·</span> <a href="https:&#x2F;&#x2F;github.com&#x2F;systm-d&#x2F;alertU">GitHub</a>
+    </footer>
+  </body>
+</html>

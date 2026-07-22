@@ -1,0 +1,66 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+configure)
+    # The service account and its input/video groups. Shipped as a
+    # sysusers.d fragment so systemd owns the definition; this just applies it
+    # now instead of waiting for the next boot.
+    if [ -x /usr/bin/systemd-sysusers ] || [ -x /bin/systemd-sysusers ]; then
+        systemd-sysusers /usr/lib/sysusers.d/alertu.conf >/dev/null 2>&1 || true
+    fi
+
+    # No config file is shipped: anything under /etc would become a conffile,
+    # and the daemon rewrites this one whenever the tray or the CLI saves
+    # settings. It creates the file itself on first use; we only provide a
+    # directory it is allowed to write to.
+    mkdir -p /etc/alertu
+    chown alertu:alertu /etc/alertu 2>/dev/null || true
+    chmod 0755 /etc/alertu
+
+    if [ -x /usr/bin/gtk-update-icon-cache ]; then
+        gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+
+#DEBHELPER#
+
+# Guidance for a first-time install only ("$2" is the previously configured
+# version, empty on a fresh install). Kept inside a `configure` arm so it
+# cannot print on `postinst abort-remove`, and placed below the debhelper
+# marker above so it is the last thing on screen, under dpkg's systemd chatter.
+# Do not name that marker here: cargo-deb substitutes every occurrence of the
+# literal token, including one inside a comment, which would splice generated
+# code into the middle of this sentence and break the script.
+case "$1" in
+configure)
+    if [ -z "$2" ]; then
+        cat <<'EOF'
+
+AlertU has been installed and its services have been configured.
+
+Its control socket is mode 0660, owned by the `alertu` group. Connecting to it
+grants full command of the alarm, so membership is a privilege grant — which is
+also why this package cannot grant it for you. Add yourself:
+
+    sudo usermod -aG alertu <user>
+
+then log out and back in. Until you do, the tray, the settings window and
+alertu-ctl will not be able to reach the daemon.
+
+The tray is shipped but not started: it is a user service, and a package must
+not touch your systemd user instance. Once logged back in, run:
+
+    systemctl --user enable --now alertu-gui
+
+No remote is configured yet. Run `alertu-ctl list-devices`, then set
+`remote_name_hint` to part of your remote's name. See
+/usr/share/doc/alertu/config.example.toml.
+
+EOF
+    fi
+    ;;
+esac
+
+exit 0

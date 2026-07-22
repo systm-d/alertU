@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    name: Debian package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # alertu-settings builds eframe, which needs the X11/Wayland/GL headers.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      # A tag that disagrees with Cargo.toml would produce a package labelled
+      # with one version and containing another.
+      - name: Check the tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$crate" != "$tag" ]; then
+            echo "tag $tag does not match Cargo.toml version $crate" >&2
+            exit 1
+          fi
+          echo "version $crate"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # No -o: cargo-deb's default name is the Debian convention
+      # (alertu_0.1.0-1_amd64.deb), which is what someone holding two releases
+      # needs. It prints the path it wrote, so capture that rather than
+      # reconstructing the name from the version and the architecture.
+      - name: Stage and package
+        run: |
+          ./packaging/deb/stage.sh
+          deb=$(cargo deb --no-build -p alertu-daemon)
+          echo "deb=$deb" >> "$GITHUB_ENV"
+          echo "produced $deb"
+
+      # Unlike the developer's Fedora machine, this runner has a Debian package
+      # database, so `$auto` resolves real dependencies here — and this is the
+      # only place that can be checked.
+      - name: Show what was produced
+        run: |
+          dpkg-deb -I "$deb"
+          dpkg-deb -c "$deb"
+          dpkg-deb -f "$deb" Depends | grep -q libc6 || { echo "Depends lost its \$auto resolution" >&2; exit 1; }
+
+      # A package that builds but does not install is worthless, and that is
+      # only ever discovered by trying. The runner has systemd, so the unit is
+      # genuinely enabled and started here.
+      #
+      # `is-enabled` passes for a unit that enabled cleanly and then died on
+      # start, and cargo-deb's generated start fragment is itself `|| true`, so
+      # `is-active` is the assertion that actually catches a broken daemon.
+      - name: Install it
+        run: |
+          sudo apt-get install -y "$deb"
+          alertu-ctl --version
+          systemctl is-enabled alertu-daemon
+          systemctl is-active --quiet alertu-daemon || { sudo journalctl -u alertu-daemon --no-pager -n 50; exit 1; }
+          dpkg -L alertu | sort
+
+      - name: Remove it again
+        run: sudo apt-get purge -y alertu
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alertu-deb
+          path: ${{ env.deb }}
+
+      # `upload` requires a release to exist already, which it does not when the
+      # tag was pushed with plain `git tag && git push --tags`. Create it if
+      # missing, fall back to uploading into one made by hand or by the UI.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$deb" --generate-notes ||
+            gh release upload "$GITHUB_REF_NAME" "$deb" --clobber

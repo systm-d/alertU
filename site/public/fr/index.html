@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AlertU — Verrouillez votre machine. Gardez le contrôle.</title>
+    <meta name="description" content="Verrouillez votre machine. Gardez le contrôle. Un CLI Linux qui transforme n&#x27;importe quelle télécommande USB&#x2F;Bluetooth en alarme de voiture pour votre ordinateur." />
+    <meta name="theme-color" content="#04070c" />
+    <meta property="og:title" content="AlertU" />
+    <meta property="og:description" content="Verrouillez votre machine. Gardez le contrôle. Un CLI Linux qui transforme n&#x27;importe quelle télécommande USB&#x2F;Bluetooth en alarme de voiture pour votre ordinateur." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://systm-d.github.io/alertU/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="https://systm-d.github.io/alertU/favicon.png" />
+    <link rel="stylesheet" href="https://systm-d.github.io/alertU/syntax.css" />
+    <link rel="stylesheet" href="https://systm-d.github.io/alertU/main.css" />
+  </head>
+  <body>
+    <div class="glow" aria-hidden="true"></div>
+    
+<header class="hero">
+  <div class="wrap">
+    <div class="topbar">
+      <span class="wordmark">alert<span class="u">U</span></span>
+      <nav class="langs" aria-label="Langue">
+        <a href="https://systm-d.github.io/alertU/" hreflang="en">EN</a>
+        <a class="on" aria-current="true" href="https://systm-d.github.io/alertU/fr/" hreflang="fr">FR</a>
+      </nav>
+    </div>
+
+    <div class="hero__inner">
+      <img class="hero__logo" src="https://systm-d.github.io/alertU/logo.png" width="512" height="512"
+           alt="Le logo AlertU : un bouclier néon en dégradé vert-cyan, une cloche d&#x27;alarme rouge à l&#x27;intérieur, des ondes rouges au-dessus." />
+      <p class="eyebrow">Linux · logind · evdev</p>
+      <h1>Verrouillez votre machine. Gardez le contrôle.</h1>
+      <p class="lede">Une télécommande USB ou Bluetooth bon marché devient la clé de votre bureau Linux. Un clic pour armer : la session se verrouille et un bip retentit. Touchez la machine pendant qu&#x27;elle est armée et un compte à rebours démarre — puis une sirène, une photo webcam horodatée, et un webhook optionnel.</p>
+
+      <div class="cta">
+        <a class="button button--primary" href="#install">Installer</a>
+        <a class="button" href="https:&#x2F;&#x2F;github.com&#x2F;systm-d&#x2F;alertU">Voir sur GitHub</a>
+      </div>
+
+      <div class="term term--hero">
+        <div class="term__bar" aria-hidden="true"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">alertu-ctl</span></div>
+<pre><code><span class="p">$</span> alertu-ctl status
+<span class="s-idle">Idle</span>
+<span class="p">$</span> alertu-ctl toggle            <span class="dim"># exactement ce que fait un clic sur la télécommande</span>
+ok
+<span class="p">$</span> alertu-ctl --json status --watch
+{"event":"state","state":"<span class="s-armed">armed</span>"}
+{"event":"state_changed","state":"<span class="s-trig">triggered</span>"}
+{"event":"state_changed","state":"<span class="s-alarm">alarm</span>"}</code></pre>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <section>
+<p class="eyebrow">Fonctionnement</p>
+<h2 id="quatre-etats-une-seule-telecommande">Quatre états, une seule télécommande</h2>
+<p class="section__lede">Une seule tâche du démon détient tout l'état mutable et pilote chaque transition à partir de quatre sources multiplexées : les signaux d'entrée, les changements de verrouillage de session, les commandes IPC et les minuteries internes.</p>
+<ol class="flow">
+  <li class="s1"><p class="st"><span class="dot"></span>Idle</p><p>Désarmé. Rien n'est surveillé.</p></li>
+  <li class="s2"><p class="st"><span class="dot"></span>Armed</p><p>Un clic sur la télécommande verrouille la session via <code>loginctl lock-session</code> et joue un bref bip. Les entrées surveillées deviennent actives après un délai de grâce.</p></li>
+  <li class="s3"><p class="st"><span class="dot"></span>Triggered</p><p>Une activité sur un périphérique surveillé lance un compte à rebours réglable, accompagné d'un tic d'avertissement discret.</p></li>
+  <li class="s4"><p class="st"><span class="dot"></span>Alarm</p><p>Le compte à rebours a expiré. La sirène tourne en boucle, une photo webcam horodatée est enregistrée, et le webhook optionnel est déclenché.</p></li>
+</ol>
+<p class="flow-note"><strong>Désarmement : le premier qui arrive gagne.</strong> Un nouveau clic sur la télécommande, ou un déverrouillage normal par mot de passe — lu en temps réel dans le <code>LockedHint</code> de logind via D-Bus, avec repli sur un sondage de <code>loginctl</code> si le bus est indisponible. Déverrouillez pendant le compte à rebours et tout revient à Idle.</p>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">Ce que c'est</p>
+<h2 id="petit-local-et-franc-la-dessus">Petit, local, et franc là-dessus</h2>
+<div class="feats">
+  <div class="feat"><h3><span class="mark">◆</span> N'importe quelle télécommande</h3><p>Aucun modèle n'est codé en dur. Tout périphérique USB ou Bluetooth qui apparaît comme un nœud HID sous <code>/dev/input/eventX</code> fonctionne — un pointeur de présentation, un déclencheur photo Bluetooth, un clavier d'appoint — et <code>toggle_keys</code> accepte n'importe quel nom de touche evdev.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> X11 et Wayland</h3><p>Il ne parle qu'à logind : aucune dépendance à un compositeur ou à un environnement de bureau. Linux avec systemd, c'est toute l'exigence.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> Quatre binaires</h3><p>Un démon privilégié, une icône de barre d'état StatusNotifierItem, une fenêtre de réglages egui autonome, et <code>alertu-ctl</code>. Chaque interface parle au démon via une seule socket Unix locale, en JSON ligne à ligne.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> 100 % local</h3><p>Pas de cloud, pas de télémétrie, pas de compte. La seule chose qui quitte un jour la machine est le webhook que vous configurez vous-même — et il est vide par défaut.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> Rust pur là où ça compte</h3><p>La barre d'état utilise <code>zbus</code>, pas <code>libdbus</code> ; ni GTK, ni Qt, ni liaison ALSA. L'audio, la capture webcam et le webhook délèguent à <code>paplay</code>/<code>ffplay</code>, <code>fswebcam</code>/<code>ffmpeg</code> et <code>curl</code>.</p></div>
+  <div class="feat"><h3><span class="mark">◆</span> Testé, et sous MIT</h3><p>102 tests — unitaires, plus des tests d'intégration qui pilotent un vrai démon par sa socket avec un faux <code>loginctl</code> — exécutés à chaque push, avec <code>rustfmt</code> et clippy en <code>-D warnings</code>.</p></div>
+</div>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">Votre télécommande</p>
+<h2 id="aucune-telecommande-par-defaut-deliberement">Aucune télécommande par défaut — délibérément</h2>
+<p class="section__lede"><code>remote_name_hint</code> est vide au départ, et vide signifie <em>aucune télécommande</em>, pas « prends la première ». Une sous-chaîne vide correspondrait à tous les périphériques ; AlertU ne résout donc rien plutôt que de lier silencieusement votre bouton au nœud qui s'est énuméré en premier. Tant que vous n'avez pas nommé un périphérique, le démon le signale dans son journal et le bouton est simplement indisponible — tout le reste fonctionne.</p>
+<div class="term">
+<div class="term__bar" aria-hidden="true"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">trouver sa télécommande</span></div>
+<pre><code><span class="p">$</span> alertu-ctl list-devices
+/dev/input/event3  AT Translated Set 2 keyboard [keyboard]
+/dev/input/event5  Logitech USB Receiver [pointer]
+/dev/input/event9  BT Camera Shutter [keyboard]
+<p><span class="p">$</span> sudo journalctl -u alertu-daemon -f   <span class="dim"># puis pressez un bouton, en RUST_LOG=debug</span></code></pre></p>
+</div>
+<p class="flow-note">Il ne reste qu'à poser <code>remote_name_hint = "shutter"</code> et <code>toggle_keys = ["KEY_VOLUMEUP"]</code> — depuis la barre d'état, depuis la fenêtre de réglages, ou avec <code>alertu-ctl set-config</code>. Les périphériques surveillés valent <code>["auto"]</code> par défaut : tout sauf la télécommande et la souris principale.</p>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">Ligne de commande</p>
+<h2 id="tout-ce-que-fait-la-barre-d-etat-depuis-un-script">Tout ce que fait la barre d'état, depuis un script</h2>
+<ul class="commands">
+  <li><code>alertu-ctl status</code><span>Idle, Armed, Triggered ou Alarm</span></li>
+  <li><code>alertu-ctl status --watch</code><span>une ligne par changement d'état, jusqu'à interruption</span></li>
+  <li><code>alertu-ctl arm</code><span>armement forcé — verrouille la session</span></li>
+  <li><code>alertu-ctl disarm</code><span>désarmement forcé — la déverrouille</span></li>
+  <li><code>alertu-ctl toggle</code><span>exactement ce que fait un clic sur la télécommande</span></li>
+  <li><code>alertu-ctl get-config</code><span>la configuration effective du démon, en TOML</span></li>
+  <li><code>alertu-ctl set-config c.toml</code><span>la remplace (<code>-</code> lit stdin), validée localement d'abord</span></li>
+  <li><code>alertu-ctl list-devices</code><span>les périphériques d'entrée que le démon voit</span></li>
+  <li><code>alertu-ctl gen-sounds --dir …</code><span>écrit les trois fichiers son par défaut</span></li>
+</ul>
+<p class="flow-note"><code>--json</code> affiche la réponse brute du protocole du démon : une transition observée arrive donc en <code>{"event":"state_changed","state":"armed"}</code> et reste distinguable de l'instantané <code>state</code> initial. Codes de sortie : <code>0</code> succès, <code>1</code> erreur de démon ou de connexion, <code>2</code> erreur d'usage.</p>
+</section>
+<hr class="divider" />
+<section>
+<p class="eyebrow">Périmètre</p>
+<h2 id="un-gadget-personnel-pas-un-systeme-antivol">Un gadget personnel, pas un système antivol</h2>
+<div class="callout callout--alarm">
+<p>Ce sont les mots du projet lui-même, et ce site ne prétendra pas le contraire. Il n'y a aucune protection anti-altération des binaires. La socket de contrôle est en <code>0660</code> dans le groupe du démon, et s'y connecter équivaut au contrôle total de l'alarme — la désarmer, lire la configuration y compris l'URL du webhook, et <code>SetConfig</code>, qui oriente les chemins passés aux programmes auxiliaires. Considérez l'appartenance au groupe comme un privilège accordé, pas comme un confort.</p>
+<p>Les photos d'alarme relèvent de la même frontière : chaque cliché est écrit en <code>0640</code> dans ce groupe, dans un <code>snapshot_dir</code> que le démon maintient en <code>0750</code> quand il en est propriétaire. Délibérément non lisible par tous — une photo webcam de quiconque se trouve devant la machine, propriétaire compris, n'a rien à y faire. Un répertoire dont le démon n'est pas propriétaire est laissé tel quel, avec un avertissement, plutôt que re-permissionné.</p>
+</div>
+</section>
+<hr class="divider" />
+<section id="install">
+<p class="eyebrow">Installation</p>
+<h2 id="compile-depuis-les-sources-aujourd-hui">Compilé depuis les sources, aujourd'hui</h2>
+<p class="section__lede">Il n'existe pas encore de paquet publié — un paquet Debian est en cours. Pour l'instant, compilez et installez les unités systemd fournies. La marche à suivre complète, avec l'unité utilisateur de la barre d'état, les icônes et l'entrée de menu, est dans le <a href="https://github.com/systm-d/alertU#install-systemd">README</a>.</p>
+<div class="steps">
+  <div class="step">
+    <h3>1 · Compiler</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">git</span></span><span class="z-meta z-function-call z-arguments z-shell"> clone https://github.com/systm-d/alertU</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-support z-function z-cd z-shell">cd</span></span><span class="z-meta z-function-call z-arguments z-shell"> alertU</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">cargo</span></span><span class="z-meta z-function-call z-arguments z-shell"> build<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>release</span></span>
+</span></code></pre>
+<p>Nécessite une toolchain Rust stable récente. Seul <code>alertu-settings</code> tire des dépendances système (egui se lie à X11/Wayland/GL) — écartez-le avec <code>--workspace --exclude alertu-settings</code>.</p>
+  </div>
+  <div class="step">
+    <h3>2 · Compte de service &amp; unités</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> systemd-sysusers packaging/sysusers.d/alertu.conf</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> install<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>Dm644</span> packaging/alertu-daemon.service <span class="z-punctuation z-separator z-continuation z-line z-shell">\
+</span></span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-arguments z-shell">  /etc/systemd/system/alertu-daemon.service</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> alertu-ctl gen-sounds<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>dir</span> /usr/share/sounds/alertu</span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> systemctl enable<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>now</span> alertu-daemon</span>
+</span></code></pre>
+<p>C'est le compte du démon qui a besoin de <code>input</code> et <code>video</code> ; le vôtre n'a besoin d'aucun des deux.</p>
+  </div>
+  <div class="step">
+    <h3>3 · Rejoindre le groupe de la socket</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> usermod<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>aG</span> alertu <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span><span class="z-meta z-group z-expansion z-parameter z-shell"><span class="z-punctuation z-definition z-variable z-shell">$</span><span class="z-variable z-other z-readwrite z-shell">USER</span></span><span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span>
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> puis ouvrez une nouvelle session, ou : newgrp alertu</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span></code></pre>
+<p>La socket est en <code>0660</code>. Sans ce groupe, la barre d'état, la fenêtre de réglages et <code>alertu-ctl</code> échouent tous à se connecter.</p>
+  </div>
+  <div class="step">
+    <h3>4 · Programmes auxiliaires</h3>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> photos : l&#39;un de</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">fswebcam</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ffmpeg</span></span>
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> audio : l&#39;un de</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">paplay</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">pw-play</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">aplay</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">ffplay</span></span>  <span class="z-keyword z-operator z-logical z-pipe z-shell">|</span>  <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">play</span></span>
+</span></code></pre>
+<p>AlertU délègue à ces outils au lieu de s'y lier : prenez celui que votre distribution embarque déjà.</p>
+  </div>
+</div>
+<p class="callout"><strong>Une relecture Linux du vieil iAlertU du Mac.</strong> Sous licence MIT, développé au grand jour sur <a href="https://github.com/systm-d/alertU">systm-d/alertU</a>. La configuration vit dans <code>/etc/alertu/config.toml</code>, et chaque champ y est documenté en ligne dans <a href="https://github.com/systm-d/alertU/blob/main/packaging/config.example.toml"><code>packaging/config.example.toml</code></a>.</p>
+</section>
+
+</main>
+
+    <footer>
+      
+      100 % local <span class="sep">·</span> Linux + systemd <span class="sep">·</span> MIT
+      
+      <span class="sep">·</span> <a href="https:&#x2F;&#x2F;github.com&#x2F;systm-d&#x2F;alertU">GitHub</a>
+    </footer>
+  </body>
+</html>
