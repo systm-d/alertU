@@ -86,7 +86,7 @@ jobs:
       - name: Remove it again
         run: sudo apt-get purge -y alertu
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: alertu-deb
           path: ${{ env.deb }}
@@ -246,7 +246,7 @@ jobs:
           docker exec rpmtest bash -c 'test -f /var/lib/alertu/snapshots/keep.jpg && test -d /etc/alertu'
           docker rm -f rpmtest
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: alertu-rpm
           path: ${{ env.rpm }}
