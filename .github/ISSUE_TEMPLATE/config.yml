@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/systm-d/alertU/security/advisories/new
+    about: Report vulnerabilities privately here — never in a public issue. See SECURITY.md.
+  - name: Configuration reference
+    url: https://github.com/systm-d/alertU/blob/main/packaging/config.example.toml
+    about: Every config field is documented here. Check it before filing a bug about behaviour you can configure.

@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in AlertU behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do **not** use this form for security
+        issues — report those privately through
+        [SECURITY.md](https://github.com/systm-d/alertU/blob/main/SECURITY.md).
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part
+      options:
+        - Daemon (alertu-daemon)
+        - Tray (alertu-gui)
+        - Settings window (alertu-settings)
+        - Command line (alertu-ctl)
+        - Packaging / install (.deb or .rpm)
+        - Not sure / something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `alertu-ctl --version`.
+      placeholder: alertu-ctl 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Distribution and install method
+      description: e.g. "Fedora 43, installed the .rpm" or "Debian 13, built from source".
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Arm with the remote
+        2. Touch the touchpad
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon logs
+      description: >-
+        `sudo journalctl -u alertu-daemon -n 100 --no-pager`, ideally after
+        restarting with `RUST_LOG=debug`. Read them before pasting — the logs
+        name your input devices.
+      render: shell
+  - type: textarea
+    id: config
+    attributes:
+      label: Config (optional)
+      description: >-
+        Relevant parts of /etc/alertu/config.toml. Redact any webhook URL.
+      render: toml
+  - type: checkboxes
+    id: not-security
+    attributes:
+      label: Confirmation
+      options:
+        - label: >-
+            This is not a security vulnerability. Those go through SECURITY.md,
+            not here.
+          required: true

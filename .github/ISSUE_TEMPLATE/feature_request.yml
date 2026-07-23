@@ -1,0 +1,27 @@
+name: Idea or feature request
+description: Suggest a change or an addition
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation or limitation behind this. What is missing or awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like AlertU to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+  - type: markdown
+    attributes:
+      value: >-
+        For anything beyond a small change, it is worth agreeing on the approach
+        here before opening a pull request — see
+        [CONTRIBUTING.md](https://github.com/systm-d/alertU/blob/main/CONTRIBUTING.md).

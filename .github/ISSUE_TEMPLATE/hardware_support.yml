@@ -1,0 +1,42 @@
+name: Remote / hardware support
+description: A remote or input device that will not work as a key fob
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        AlertU hardcodes no device model — a remote is matched by a name
+        substring (`remote_name_hint`) and a key name (`toggle_keys`). Most
+        "my remote doesn't work" cases are configuration, so please try the two
+        steps below first.
+  - type: checkboxes
+    id: tried-config
+    attributes:
+      label: Before filing
+      options:
+        - label: I ran `alertu-ctl list-devices` and set `remote_name_hint` to part of my device's name.
+          required: true
+        - label: I set `toggle_keys` to the key my button emits, and it still does not work.
+          required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device name
+      description: As it appears in `alertu-ctl list-devices`.
+    validations:
+      required: true
+  - type: textarea
+    id: list-devices
+    attributes:
+      label: Output of `alertu-ctl list-devices`
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: keys
+    attributes:
+      label: What the button emits
+      description: >-
+        Restart the daemon with `RUST_LOG=debug`, press the button, and paste
+        the lines it logs. They show which device and key code the button sends.
+      render: shell
