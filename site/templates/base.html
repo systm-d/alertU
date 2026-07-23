@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}{{ config.title }}{% endblock title %}</title>
     <meta name="description" content="{{ config.description }}" />
-    <meta name="theme-color" content="#04070c" />
+    <meta name="theme-color" content="#ffffff" />
     <meta property="og:title" content="{{ config.title }}" />
     <meta property="og:description" content="{{ config.description }}" />
     <meta property="og:type" content="website" />
@@ -16,15 +16,16 @@
     <link rel="stylesheet" href="{{ get_url(path='main.css') }}" />
   </head>
   <body>
-    <div class="glow" aria-hidden="true"></div>
     {% block content %}{% endblock content %}
     <footer>
-      {% if lang == 'fr' %}
-      100 % local <span class="sep">·</span> Linux + systemd <span class="sep">·</span> MIT
-      {% else %}
-      100% local <span class="sep">·</span> Linux + systemd <span class="sep">·</span> MIT
-      {% endif %}
-      <span class="sep">·</span> <a href="{{ config.extra.repo_url }}">GitHub</a>
+      <span class="foot__mark">alert<span class="u">U</span></span>
+      <span class="foot__meta">
+        {% if lang == 'fr' %}100 % local{% else %}100% local{% endif %}
+        <span class="sep">·</span> Linux + systemd
+        <span class="sep">·</span> MIT
+        <span class="sep">·</span> <a href="{{ config.extra.repo_url }}">GitHub</a>
+      </span>
     </footer>
+    <script src="{{ get_url(path='reveal.js') }}" defer></script>
   </body>
 </html>

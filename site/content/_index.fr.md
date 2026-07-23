@@ -2,152 +2,107 @@
 title = "AlertU"
 
 [extra]
-eyebrow = "Linux · logind · evdev"
-tagline = "Verrouillez votre machine. Gardez le contrôle."
-lede = "Une télécommande USB ou Bluetooth bon marché devient la clé de votre bureau Linux. Un clic pour armer : la session se verrouille et un bip retentit. Touchez la machine pendant qu'elle est armée et un compte à rebours démarre — puis une sirène, une photo webcam horodatée, et un webhook optionnel."
-cta = "Voir sur GitHub"
-cta2 = "Installer"
-logo_alt = "Le logo AlertU : un bouclier néon en dégradé vert-cyan, une cloche d'alarme rouge à l'intérieur, des ondes rouges au-dessus."
+nav_label = "Principal"
+nav_docs = "Docs"
+nav_download = "Télécharger"
 langs_label = "Langue"
-term_toggle = "exactement ce que fait un clic sur la télécommande"
+
+hero_eyebrow = "Comme une alarme de voiture — pour votre ordinateur"
+hero_title = "Verrouillez. Éloignez-vous. AlertU monte la garde."
+hero_lede = "Armez votre machine d'un clic : l'écran se verrouille, un bip retentit, et une veille silencieuse commence. Touchez-la en votre absence et AlertU déclenche l'alarme, prend une photo, et alerte votre téléphone."
+cta_download = "Télécharger"
+cta_github = "GitHub"
+cta_docs = "Documentation"
+hero_meta = "Libre et open source · Linux + systemd · MIT"
+
+how_eyebrow = "Fonctionnement"
+how_title = "Six étapes, un réflexe"
+how_lede = "La boucle d'une alarme de voiture — armer, surveiller, réagir — au calme dans un démon sur votre machine."
+step_arm = "Armer"
+step_arm_d = "Un clic verrouille la session."
+step_leave = "Partir"
+step_leave_d = "Allez chercher un café. La veille démarre."
+step_detect = "Détecter"
+step_detect_d = "Une touche ou la souris la déclenche."
+step_alarm = "Alarme"
+step_alarm_d = "Un compte à rebours, puis la sirène."
+step_snap = "Photo"
+step_snap_d = "La webcam enregistre un cliché."
+step_disarm = "Désarmer"
+step_disarm_d = "Recliquez — retour au calme."
+
+detect_eyebrow = "Intrusion"
+detect_title = "Elle sait dès qu'on y touche"
+detect_body = "Une fois armée, AlertU surveille vos périphériques d'entrée au niveau du noyau. Un mouvement de souris, une frappe au clavier, un effleurement du trackpad — toute activité sur un périphérique surveillé lance un compte à rebours réglable, avec un tic d'avertissement discret."
+detect_t1 = "Surveille tout périphérique d'entrée — clavier, souris, trackpad"
+detect_t2 = "Un délai de grâce après l'armement, pour partir tranquille"
+detect_t3 = "X11 ou Wayland — elle ne parle qu'à logind"
+
+alarm_eyebrow = "Alarme"
+alarm_title = "Puis elle fait du bruit"
+alarm_body = "Quand le compte à rebours expire, la sirène tourne en boucle et la machine cesse d'être discrète. Branchez le webhook optionnel sur votre téléphone, Slack ou Discord et l'alerte arrive dans votre poche, où que vous soyez."
+alarm_t1 = "Une sirène en boucle, assez forte pour faire tourner les têtes"
+alarm_t2 = "Un webhook optionnel — envoyez-le sur votre téléphone, à votre façon"
+
+capture_eyebrow = "Preuve"
+capture_title = "Et retient le visage"
+capture_body = "À l'instant où l'alarme se déclenche, AlertU enregistre un cliché webcam horodaté. Retrouvez une petite galerie de qui s'est penché sur votre écran pendant votre absence."
+capture_t1 = "Des clichés horodatés, enregistrés localement"
+capture_t2 = "Gardés privés — mode 0640, jamais lisibles par tous"
+
+disarm_eyebrow = "Désarmement"
+disarm_title = "Désarmez comme vous avez armé"
+disarm_body = "Votre télécommande est la clé. Un second clic, ou un déverrouillage normal par mot de passe, ramène tout au calme. Le premier qui arrive gagne — déverrouillez pendant le compte à rebours et rien ne se déclenche."
+disarm_t1 = "N'importe quelle télécommande USB ou Bluetooth devient la clé"
+disarm_t2 = "Ou déverrouillez simplement l'écran — logind prévient AlertU en temps réel"
+
+dev_eyebrow = "Conçu pour les développeurs"
+dev_title = "Petit, local, et franc là-dessus"
+dev_lede = "Pas de cloud, pas de compte, pas de télémétrie. Quatre petits binaires qui dialoguent sur une seule socket locale."
+card1_t = "Tout bureau Linux"
+card1_d = "X11 et Wayland, toute distro avec systemd. Aucun environnement de bureau requis."
+card2_t = "Open source"
+card2_d = "Sous licence MIT, développé au grand jour. Lisez chaque ligne, envoyez un patch."
+card3_t = "Vie privée d'abord"
+card3_d = "Tout reste sur votre machine. La seule chose qui part est le webhook que vous configurez."
+card4_t = "Installation rapide"
+card4_d = "Un paquet pour votre distro, nommez votre télécommande, et vous êtes armé en une minute."
+card5_t = "Léger"
+card5_d = "Rust pur là où ça compte. Ni GTK, ni Qt, ni liaison ALSA."
+card6_t = "Testé à fond"
+card6_d = "102 tests à chaque push, avec rustfmt et clippy en -D warnings."
+
+scen_eyebrow = "En pratique"
+scen_title = "Une pause café, sous garde"
+scen_lede = "Toute l'histoire, telle qu'elle se déroule vraiment."
+scen1 = "Vous lancez une longue compilation."
+scen2 = "Vous armez AlertU et vous levez."
+scen3 = "Quelqu'un touche votre clavier."
+scen4 = "La sirène se déclenche."
+scen5 = "Un cliché est capturé."
+scen6 = "Vous cliquez la télécommande — calme revenu."
+
+install_eyebrow = "Installation"
+install_title = "Un paquet pour votre distribution"
+install_lede = "Chaque version publie un .rpm et un .deb — les quatre binaires, les unités systemd et les sons. Sur toute autre distro, compilez avec cargo."
+install_source = "Source"
+install_note = 'Un paquet ne peut ni vous ajouter à un groupe ni démarrer une unité utilisateur : quelques lignes restent à vous. Guide complet dans le <a href="https://github.com/systm-d/alertU#readme">README</a>.'
+
+footer_quote_1 = "Toujours à veiller."
+footer_quote_2 = "Jusqu'à votre retour."
+
+ico_arm = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'
+ico_leave = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3h6a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-6"/><path d="M10 12H3"/><path d="M6 8l-4 4 4 4"/></svg>'
+ico_detect = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>'
+ico_alarm = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 0 0-12 0c0 6-3 8-3 8h18s-3-2-3-8"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>'
+ico_snap = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L18 8h2a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>'
+ico_disarm = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5.5"/></svg>'
+ico_touch = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l13 8-5.5 1.2L11 18z"/></svg>'
+ico_coffee = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h11v5a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4z"/><path d="M16 10h2a2 2 0 0 1 0 4h-2"/><path d="M8 3v2M11.5 3v2"/></svg>'
+ico_platform = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>'
+ico_open = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 6 5 6"/><path d="M16 6l5 6-5 6"/></svg>'
+ico_privacy = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4-3 6.5-7 8-4-1.5-7-4-7-8V6z"/><path d="M9.5 12l2 2 3.5-4"/></svg>'
+ico_fast = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>'
+ico_light = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20c0-8 6-14 16-15C19 13 13 20 4 20Z"/><path d="M9 15c2-2 5-3 8-4"/></svg>'
+ico_secure = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.2"/></svg>'
 +++
-
-<section>
-<p class="eyebrow">Fonctionnement</p>
-
-## Quatre états, une seule télécommande
-
-<p class="section__lede">Une seule tâche du démon détient tout l'état mutable et pilote chaque transition à partir de quatre sources multiplexées : les signaux d'entrée, les changements de verrouillage de session, les commandes IPC et les minuteries internes.</p>
-
-<ol class="flow">
-  <li class="s1"><p class="st"><span class="dot"></span>Idle</p><p>Désarmé. Rien n'est surveillé.</p></li>
-  <li class="s2"><p class="st"><span class="dot"></span>Armed</p><p>Un clic sur la télécommande verrouille la session via <code>loginctl lock-session</code> et joue un bref bip. Les entrées surveillées deviennent actives après un délai de grâce.</p></li>
-  <li class="s3"><p class="st"><span class="dot"></span>Triggered</p><p>Une activité sur un périphérique surveillé lance un compte à rebours réglable, accompagné d'un tic d'avertissement discret.</p></li>
-  <li class="s4"><p class="st"><span class="dot"></span>Alarm</p><p>Le compte à rebours a expiré. La sirène tourne en boucle, une photo webcam horodatée est enregistrée, et le webhook optionnel est déclenché.</p></li>
-</ol>
-
-<p class="flow-note"><strong>Désarmement : le premier qui arrive gagne.</strong> Un nouveau clic sur la télécommande, ou un déverrouillage normal par mot de passe — lu en temps réel dans le <code>LockedHint</code> de logind via D-Bus, avec repli sur un sondage de <code>loginctl</code> si le bus est indisponible. Déverrouillez pendant le compte à rebours et tout revient à Idle.</p>
-</section>
-
-<hr class="divider" />
-<section>
-<p class="eyebrow">Ce que c'est</p>
-
-## Petit, local, et franc là-dessus
-
-<div class="feats">
-  <div class="feat"><h3><span class="mark">◆</span> N'importe quelle télécommande</h3><p>Aucun modèle n'est codé en dur. Tout périphérique USB ou Bluetooth qui apparaît comme un nœud HID sous <code>/dev/input/eventX</code> fonctionne — un pointeur de présentation, un déclencheur photo Bluetooth, un clavier d'appoint — et <code>toggle_keys</code> accepte n'importe quel nom de touche evdev.</p></div>
-  <div class="feat"><h3><span class="mark">◆</span> X11 et Wayland</h3><p>Il ne parle qu'à logind : aucune dépendance à un compositeur ou à un environnement de bureau. Linux avec systemd, c'est toute l'exigence.</p></div>
-  <div class="feat"><h3><span class="mark">◆</span> Quatre binaires</h3><p>Un démon privilégié, une icône de barre d'état StatusNotifierItem, une fenêtre de réglages egui autonome, et <code>alertu-ctl</code>. Chaque interface parle au démon via une seule socket Unix locale, en JSON ligne à ligne.</p></div>
-  <div class="feat"><h3><span class="mark">◆</span> 100 % local</h3><p>Pas de cloud, pas de télémétrie, pas de compte. La seule chose qui quitte un jour la machine est le webhook que vous configurez vous-même — et il est vide par défaut.</p></div>
-  <div class="feat"><h3><span class="mark">◆</span> Rust pur là où ça compte</h3><p>La barre d'état utilise <code>zbus</code>, pas <code>libdbus</code> ; ni GTK, ni Qt, ni liaison ALSA. L'audio, la capture webcam et le webhook délèguent à <code>paplay</code>/<code>ffplay</code>, <code>fswebcam</code>/<code>ffmpeg</code> et <code>curl</code>.</p></div>
-  <div class="feat"><h3><span class="mark">◆</span> Testé, et sous MIT</h3><p>102 tests — unitaires, plus des tests d'intégration qui pilotent un vrai démon par sa socket avec un faux <code>loginctl</code> — exécutés à chaque push, avec <code>rustfmt</code> et clippy en <code>-D warnings</code>.</p></div>
-</div>
-</section>
-
-<hr class="divider" />
-<section>
-<p class="eyebrow">Votre télécommande</p>
-
-## Aucune télécommande par défaut — délibérément
-
-<p class="section__lede"><code>remote_name_hint</code> est vide au départ, et vide signifie <em>aucune télécommande</em>, pas « prends la première ». Une sous-chaîne vide correspondrait à tous les périphériques ; AlertU ne résout donc rien plutôt que de lier silencieusement votre bouton au nœud qui s'est énuméré en premier. Tant que vous n'avez pas nommé un périphérique, le démon le signale dans son journal et le bouton est simplement indisponible — tout le reste fonctionne.</p>
-
-<div class="term">
-<div class="term__bar" aria-hidden="true"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">trouver sa télécommande</span></div>
-<pre><code><span class="p">$</span> alertu-ctl list-devices
-/dev/input/event3  AT Translated Set 2 keyboard [keyboard]
-/dev/input/event5  Logitech USB Receiver [pointer]
-/dev/input/event9  BT Camera Shutter [keyboard]
-
-<span class="p">$</span> sudo journalctl -u alertu-daemon -f   <span class="dim"># puis pressez un bouton, en RUST_LOG=debug</span></code></pre>
-</div>
-
-<p class="flow-note">Il ne reste qu'à poser <code>remote_name_hint = "shutter"</code> et <code>toggle_keys = ["KEY_VOLUMEUP"]</code> — depuis la barre d'état, depuis la fenêtre de réglages, ou avec <code>alertu-ctl set-config</code>. Les périphériques surveillés valent <code>["auto"]</code> par défaut : tout sauf la télécommande et la souris principale.</p>
-</section>
-
-<hr class="divider" />
-<section>
-<p class="eyebrow">Ligne de commande</p>
-
-## Tout ce que fait la barre d'état, depuis un script
-
-<ul class="commands">
-  <li><code>alertu-ctl status</code><span>Idle, Armed, Triggered ou Alarm</span></li>
-  <li><code>alertu-ctl status --watch</code><span>une ligne par changement d'état, jusqu'à interruption</span></li>
-  <li><code>alertu-ctl arm</code><span>armement forcé — verrouille la session</span></li>
-  <li><code>alertu-ctl disarm</code><span>désarmement forcé — la déverrouille</span></li>
-  <li><code>alertu-ctl toggle</code><span>exactement ce que fait un clic sur la télécommande</span></li>
-  <li><code>alertu-ctl get-config</code><span>la configuration effective du démon, en TOML</span></li>
-  <li><code>alertu-ctl set-config c.toml</code><span>la remplace (<code>-</code> lit stdin), validée localement d'abord</span></li>
-  <li><code>alertu-ctl list-devices</code><span>les périphériques d'entrée que le démon voit</span></li>
-  <li><code>alertu-ctl gen-sounds --dir …</code><span>écrit les trois fichiers son par défaut</span></li>
-</ul>
-
-<p class="flow-note"><code>--json</code> affiche la réponse brute du protocole du démon : une transition observée arrive donc en <code>{"event":"state_changed","state":"armed"}</code> et reste distinguable de l'instantané <code>state</code> initial. Codes de sortie : <code>0</code> succès, <code>1</code> erreur de démon ou de connexion, <code>2</code> erreur d'usage.</p>
-</section>
-
-<hr class="divider" />
-<section>
-<p class="eyebrow">Périmètre</p>
-
-## Un gadget personnel, pas un système antivol
-
-<div class="callout callout--alarm">
-<p>Ce sont les mots du projet lui-même, et ce site ne prétendra pas le contraire. Il n'y a aucune protection anti-altération des binaires. La socket de contrôle est en <code>0660</code> dans le groupe du démon, et s'y connecter équivaut au contrôle total de l'alarme — la désarmer, lire la configuration y compris l'URL du webhook, et <code>SetConfig</code>, qui oriente les chemins passés aux programmes auxiliaires. Considérez l'appartenance au groupe comme un privilège accordé, pas comme un confort.</p>
-<p>Les photos d'alarme relèvent de la même frontière : chaque cliché est écrit en <code>0640</code> dans ce groupe, dans un <code>snapshot_dir</code> que le démon maintient en <code>0750</code> quand il en est propriétaire. Délibérément non lisible par tous — une photo webcam de quiconque se trouve devant la machine, propriétaire compris, n'a rien à y faire. Un répertoire dont le démon n'est pas propriétaire est laissé tel quel, avec un avertissement, plutôt que re-permissionné.</p>
-</div>
-</section>
-
-<hr class="divider" />
-<section id="install">
-<p class="eyebrow">Installation</p>
-
-## Un paquet pour votre distribution
-
-<p class="section__lede">Chaque <a href="https://github.com/systm-d/alertU/releases">version</a> publie deux paquets : un <code>.rpm</code> pour Fedora et un <code>.deb</code> pour Debian et Ubuntu. Les deux embarquent les quatre binaires, les unités systemd, les sons et l'entrée de menu. Aucun ne livre de fichier de configuration — le démon écrit le sien à la première utilisation.</p>
-
-<div class="steps">
-  <div class="step">
-    <h3>Fedora</h3>
-
-```sh
-sudo dnf install ./alertu-0.2.0-1.x86_64.rpm
-sudo systemctl enable --now alertu-daemon
-```
-
-<p>Fedora 40 ou plus récent. Le paquet suit la politique de Fedora et laisse le démon désactivé : la seconde ligne est à vous.</p>
-  </div>
-  <div class="step">
-    <h3>Debian &amp; Ubuntu</h3>
-
-```sh
-sudo apt install ./alertu_0.2.0-1_amd64.deb
-```
-
-<p>Debian 13 ou Ubuntu 24.04, ou plus récent. Celui-ci démarre le démon pour vous.</p>
-  </div>
-  <div class="step">
-    <h3>Ensuite, dans les deux cas</h3>
-
-```sh
-sudo usermod -aG alertu "$USER"     # puis ouvrez une nouvelle session
-systemctl --user enable --now alertu-gui
-```
-
-<p>La socket est en <code>0660</code> : sans ce groupe, la barre d'état, la fenêtre de réglages et <code>alertu-ctl</code> ne peuvent pas se connecter. Un paquet ne peut ni vous ajouter à un groupe, ni activer une unité dans votre session — ces deux lignes sont à vous.</p>
-  </div>
-  <div class="step">
-    <h3>Toute autre distribution</h3>
-
-```sh
-git clone https://github.com/systm-d/alertU
-cd alertU && cargo build --release
-```
-
-<p>Installez ensuite les unités systemd fournies à la main — la marche à suivre complète est dans le <a href="https://github.com/systm-d/alertU#install-systemd">README</a>. Seul <code>alertu-settings</code> tire des dépendances système.</p>
-  </div>
-</div>
-
-<p class="callout"><strong>Une relecture Linux du vieil iAlertU du Mac.</strong> Sous licence MIT, développé au grand jour sur <a href="https://github.com/systm-d/alertU">systm-d/alertU</a>. La configuration vit dans <code>/etc/alertu/config.toml</code>, et chaque champ y est documenté en ligne dans <a href="https://github.com/systm-d/alertU/blob/main/packaging/config.example.toml"><code>packaging/config.example.toml</code></a>.</p>
-</section>
