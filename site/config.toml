@@ -1,6 +1,6 @@
 base_url = "https://systm-d.github.io/alertU"
 title = "AlertU"
-description = "Lock your machine. Stay in control. A Linux CLI that turns any USB/Bluetooth remote into a car-alarm for your computer."
+description = "A car alarm for your computer. Lock it, walk away, and AlertU stands guard — sounding off, snapping a photo and pinging your phone the moment someone touches it. A Linux CLI, open source, MIT."
 default_language = "en"
 compile_sass = true
 build_search_index = false
@@ -14,8 +14,8 @@ highlight_themes_css = [
 
 [languages.fr]
 title = "AlertU"
-description = "Verrouillez votre machine. Gardez le contrôle. Un CLI Linux qui transforme n'importe quelle télécommande USB/Bluetooth en alarme de voiture pour votre ordinateur."
+description = "Une alarme de voiture pour votre ordinateur. Verrouillez, éloignez-vous, et AlertU monte la garde — sirène, photo et alerte sur votre téléphone dès qu'on y touche. Un CLI Linux, open source, MIT."
 
 [extra]
-brand_color = "#00daec"
+brand_color = "#2b6bff"
 repo_url = "https://github.com/systm-d/alertU"

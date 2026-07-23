@@ -1,34 +1,316 @@
 {% extends "base.html" %}
-{% block title %}AlertU — {{ section.extra.tagline }}{% endblock title %}
+{% block title %}AlertU — {{ section.extra.hero_title }}{% endblock title %}
 {% block content %}
+{% set x = section.extra %}
+
+<div class="topbar wrap">
+  <a class="wordmark" href="{{ get_url(path='@/_index.md', lang=lang) }}">
+    <span class="wordmark__badge" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+        <path d="M12 2.5 20 6v6.2c0 4.6-3.2 7.6-8 9.3-4.8-1.7-8-4.7-8-9.3V6z"
+              fill="url(#wm)" />
+        <path d="M9.3 12.2v-1.4a2.7 2.7 0 0 1 5.4 0v1.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+        <rect x="8.2" y="12" width="7.6" height="5.4" rx="1.4" fill="#fff"/>
+        <circle cx="12" cy="14.4" r="1" fill="url(#wm)"/>
+        <defs><linearGradient id="wm" x1="4" y1="3" x2="20" y2="21">
+          <stop stop-color="#2bd48b"/><stop offset="1" stop-color="#0aa6e8"/>
+        </linearGradient></defs>
+      </svg>
+    </span>
+    alert<span class="u">U</span>
+  </a>
+  <nav class="topnav" aria-label="{{ x.nav_label }}">
+    <a href="{{ config.extra.repo_url }}">GitHub</a>
+    <a href="{{ config.extra.repo_url }}#readme">{{ x.nav_docs }}</a>
+    <a class="topnav__cta" href="#install">{{ x.nav_download }}</a>
+    <span class="langs" aria-label="{{ x.langs_label }}">
+      <a{% if lang == 'en' %} class="on" aria-current="true"{% endif %} href="{{ get_url(path='@/_index.md', lang='en') }}" hreflang="en">EN</a>
+      <a{% if lang == 'fr' %} class="on" aria-current="true"{% endif %} href="{{ get_url(path='@/_index.md', lang='fr') }}" hreflang="fr">FR</a>
+    </span>
+  </nav>
+</div>
+
+<!-- ============ 1 · HERO ============ -->
 <header class="hero">
-  <div class="wrap">
-    <div class="topbar">
-      <span class="wordmark">alert<span class="u">U</span></span>
-      <nav class="langs" aria-label="{{ section.extra.langs_label }}">
-        <a{% if lang == 'en' %} class="on" aria-current="true"{% endif %} href="{{ get_url(path='@/_index.md', lang='en') }}" hreflang="en">EN</a>
-        <a{% if lang == 'fr' %} class="on" aria-current="true"{% endif %} href="{{ get_url(path='@/_index.md', lang='fr') }}" hreflang="fr">FR</a>
-      </nav>
+  <div class="wrap hero__grid">
+    <div class="hero__copy reveal">
+      <p class="eyebrow">{{ x.hero_eyebrow }}</p>
+      <h1 class="hero__title">{{ x.hero_title }}</h1>
+      <p class="lede">{{ x.hero_lede }}</p>
+      <div class="cta">
+        <a class="button button--primary" href="#install">{{ x.cta_download }}</a>
+        <a class="button" href="{{ config.extra.repo_url }}">{{ x.cta_github }}</a>
+        <a class="button button--ghost" href="{{ config.extra.repo_url }}#readme">{{ x.cta_docs }}</a>
+      </div>
+      <p class="hero__meta">{{ x.hero_meta }}</p>
     </div>
 
-    <div class="hero__inner">
-      <img class="hero__logo" src="{{ get_url(path='logo.png') }}" width="512" height="512"
-           alt="{{ section.extra.logo_alt }}" />
-      <p class="eyebrow">{{ section.extra.eyebrow }}</p>
-      <h1>{{ section.extra.tagline }}</h1>
-      <p class="lede">{{ section.extra.lede }}</p>
-
-      <div class="cta">
-        <a class="button button--primary" href="#install">{{ section.extra.cta2 }}</a>
-        <a class="button" href="{{ config.extra.repo_url }}">{{ section.extra.cta }}</a>
+    <div class="hero__art reveal" aria-hidden="true">
+      <div class="scene scene--hero">
+        <div class="aura"><span></span><span></span><span></span></div>
+        <svg class="art art--laptop is-armed" viewBox="0 0 260 190">
+          <!-- desk -->
+          <line class="desk" x1="18" y1="168" x2="242" y2="168"/>
+          <!-- laptop base -->
+          <path class="dev-base" d="M52 158h156l14 10H38z"/>
+          <!-- laptop lid -->
+          <rect class="dev-lid" x="64" y="40" width="132" height="120" rx="10"/>
+          <rect class="dev-screen" x="72" y="48" width="116" height="104" rx="6"/>
+          <!-- padlock on screen -->
+          <g class="lock" transform="translate(130 100)">
+            <rect class="lock-body" x="-19" y="-4" width="38" height="30" rx="7"/>
+            <path class="lock-shackle" d="M-11 -4v-9a11 11 0 0 1 22 0v9"/>
+            <circle class="lock-hole" cx="0" cy="9" r="3.4"/>
+            <rect class="lock-hole" x="-1.6" y="9" width="3.2" height="8" rx="1.6"/>
+          </g>
+          <!-- walking-away figure (from behind, no face) -->
+          <g class="walker">
+            <circle class="fig" cx="228" cy="120" r="9"/>
+            <path class="fig" d="M219 134c0-6 4-10 9-10s9 4 9 10v20h-18z"/>
+          </g>
+        </svg>
       </div>
+    </div>
+  </div>
+</header>
 
-      <div class="term term--hero">
-        <div class="term__bar" aria-hidden="true"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">alertu-ctl</span></div>
-<pre><code><span class="p">$</span> alertu-ctl status
+<main>
+<!-- ============ 2 · HOW IT WORKS ============ -->
+<section class="band">
+  <div class="wrap reveal">
+    <p class="eyebrow eyebrow--center">{{ x.how_eyebrow }}</p>
+    <h2 class="center">{{ x.how_title }}</h2>
+    <p class="section__lede center">{{ x.how_lede }}</p>
+
+    <ol class="frieze">
+      <li class="fr-step" style="--i:0"><span class="fr-ic">{{ x.ico_arm | safe }}</span><b>{{ x.step_arm }}</b><span>{{ x.step_arm_d }}</span></li>
+      <li class="fr-step" style="--i:1"><span class="fr-ic">{{ x.ico_leave | safe }}</span><b>{{ x.step_leave }}</b><span>{{ x.step_leave_d }}</span></li>
+      <li class="fr-step" style="--i:2"><span class="fr-ic">{{ x.ico_detect | safe }}</span><b>{{ x.step_detect }}</b><span>{{ x.step_detect_d }}</span></li>
+      <li class="fr-step" style="--i:3"><span class="fr-ic">{{ x.ico_alarm | safe }}</span><b>{{ x.step_alarm }}</b><span>{{ x.step_alarm_d }}</span></li>
+      <li class="fr-step" style="--i:4"><span class="fr-ic">{{ x.ico_snap | safe }}</span><b>{{ x.step_snap }}</b><span>{{ x.step_snap_d }}</span></li>
+      <li class="fr-step" style="--i:5"><span class="fr-ic">{{ x.ico_disarm | safe }}</span><b>{{ x.step_disarm }}</b><span>{{ x.step_disarm_d }}</span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============ 3 · DETECT ============ -->
+<section class="story">
+  <div class="wrap story__grid reveal">
+    <div class="story__art">
+      <div class="scene">
+        <svg class="art" viewBox="0 0 260 200">
+          <rect class="dev-lid" x="40" y="30" width="150" height="112" rx="10"/>
+          <rect class="dev-screen" x="48" y="38" width="134" height="96" rx="6"/>
+          <path class="dev-base" d="M30 142h170l12 10H18z"/>
+          <g class="lock lock--alarm" transform="translate(115 86)">
+            <rect class="lock-body" x="-17" y="-3" width="34" height="27" rx="6"/>
+            <path class="lock-shackle" d="M-10 -3v-8a10 10 0 0 1 20 0v8"/>
+            <circle class="lock-hole" cx="0" cy="9" r="3"/>
+          </g>
+          <g class="alarm-waves alarm-waves--red">
+            <path d="M150 40a70 70 0 0 1 0 92"/>
+            <path d="M162 30a92 92 0 0 1 0 112"/>
+          </g>
+          <!-- intruder hand / cursor -->
+          <g class="hand">
+            <path class="cursor" d="M214 150l6 34 8-14 15 5z"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div class="story__copy">
+      <p class="eyebrow eyebrow--red">{{ x.detect_eyebrow }}</p>
+      <h2>{{ x.detect_title }}</h2>
+      <p>{{ x.detect_body }}</p>
+      <ul class="ticks">
+        <li>{{ x.detect_t1 }}</li>
+        <li>{{ x.detect_t2 }}</li>
+        <li>{{ x.detect_t3 }}</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4 · ALARM ============ -->
+<section class="story story--alt">
+  <div class="wrap story__grid reveal">
+    <div class="story__copy">
+      <p class="eyebrow eyebrow--red">{{ x.alarm_eyebrow }}</p>
+      <h2>{{ x.alarm_title }}</h2>
+      <p>{{ x.alarm_body }}</p>
+      <ul class="ticks">
+        <li>{{ x.alarm_t1 }}</li>
+        <li>{{ x.alarm_t2 }}</li>
+      </ul>
+    </div>
+    <div class="story__art">
+      <div class="scene">
+        <svg class="art" viewBox="0 0 280 200">
+          <rect class="dev-lid" x="24" y="46" width="128" height="96" rx="10"/>
+          <rect class="dev-screen dev-screen--alarm" x="32" y="54" width="112" height="80" rx="6"/>
+          <path class="dev-base" d="M14 142h148l12 10H2z"/>
+          <g class="bell" transform="translate(88 90)">
+            <path class="bell-body" d="M0-16a13 13 0 0 1 13 13c0 9 3 12 5 15H-18c2-3 5-6 5-15A13 13 0 0 1 0-16z"/>
+            <circle class="bell-clap" cx="0" cy="16" r="3.5"/>
+          </g>
+          <g class="alarm-waves alarm-waves--red is-loud">
+            <path d="M150 62a58 58 0 0 1 0 76"/>
+            <path d="M162 50a80 80 0 0 1 0 100"/>
+          </g>
+          <!-- phone with sliding notification -->
+          <g class="phone">
+            <rect class="phone-body" x="206" y="52" width="60" height="112" rx="12"/>
+            <rect class="phone-screen" x="211" y="62" width="50" height="92" rx="7"/>
+            <rect class="notif" x="216" y="70" width="40" height="24" rx="5"/>
+            <rect class="notif-dot" x="220" y="76" width="6" height="6" rx="3"/>
+            <rect class="notif-l" x="230" y="76" width="22" height="3" rx="1.5"/>
+            <rect class="notif-l" x="230" y="83" width="16" height="3" rx="1.5"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5 · CAPTURE ============ -->
+<section class="story">
+  <div class="wrap story__grid reveal">
+    <div class="story__art">
+      <div class="scene">
+        <svg class="art" viewBox="0 0 260 200">
+          <!-- viewfinder -->
+          <rect class="vf" x="30" y="28" width="150" height="112" rx="10"/>
+          <g class="vf-corners">
+            <path d="M44 44h14M44 44v14"/><path d="M166 44h-14M166 44v14"/>
+            <path d="M44 124h14M44 124v-14"/><path d="M166 124h-14M166 124v-14"/>
+          </g>
+          <!-- silhouette -->
+          <g class="subject">
+            <circle cx="105" cy="78" r="16"/>
+            <path d="M78 128c0-17 12-28 27-28s27 11 27 28z"/>
+          </g>
+          <circle class="rec" cx="160" cy="40" r="4"/>
+          <text class="vf-t" x="44" y="136">REC 00:03</text>
+          <!-- flash -->
+          <rect class="flash" x="30" y="28" width="150" height="112" rx="10"/>
+          <!-- mini gallery -->
+          <g class="gallery">
+            <rect class="thumb t1" x="196" y="36" width="46" height="34" rx="5"/>
+            <rect class="thumb t2" x="196" y="80" width="46" height="34" rx="5"/>
+            <rect class="thumb t3 is-new" x="196" y="124" width="46" height="34" rx="5"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div class="story__copy">
+      <p class="eyebrow">{{ x.capture_eyebrow }}</p>
+      <h2>{{ x.capture_title }}</h2>
+      <p>{{ x.capture_body }}</p>
+      <ul class="ticks">
+        <li>{{ x.capture_t1 }}</li>
+        <li>{{ x.capture_t2 }}</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6 · DISARM (key fob) ============ -->
+<section class="story story--alt">
+  <div class="wrap story__grid reveal">
+    <div class="story__copy">
+      <p class="eyebrow eyebrow--green">{{ x.disarm_eyebrow }}</p>
+      <h2>{{ x.disarm_title }}</h2>
+      <p>{{ x.disarm_body }}</p>
+      <ul class="ticks">
+        <li>{{ x.disarm_t1 }}</li>
+        <li>{{ x.disarm_t2 }}</li>
+      </ul>
+    </div>
+    <div class="story__art">
+      <div class="scene">
+        <svg class="art" viewBox="0 0 280 190">
+          <!-- key fob / remote -->
+          <g class="fob">
+            <rect class="fob-body" x="20" y="66" width="52" height="72" rx="14"/>
+            <circle class="fob-btn" cx="46" cy="92" r="10"/>
+            <path class="fob-ico" d="M41 92l4 4 8-9" />
+            <rect class="fob-led" x="41" y="118" width="10" height="6" rx="3"/>
+          </g>
+          <!-- secure link -->
+          <path class="link" d="M78 100H176"/>
+          <!-- laptop, now safe -->
+          <rect class="dev-lid" x="182" y="52" width="84" height="70" rx="9"/>
+          <rect class="dev-screen dev-screen--safe" x="188" y="58" width="72" height="58" rx="5"/>
+          <path class="dev-base" d="M176 122h96l8 8h-112z"/>
+          <g class="lock lock--safe" transform="translate(224 86)">
+            <rect class="lock-body" x="-13" y="-2" width="26" height="21" rx="5"/>
+            <path class="lock-shackle lock-shackle--open" d="M-7 -2v-7a8 8 0 0 1 15 -2"/>
+            <path class="lock-check" d="M-4 8l3 3 6-7"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7 · BUILT FOR DEVELOPERS ============ -->
+<section class="band">
+  <div class="wrap reveal">
+    <p class="eyebrow eyebrow--center">{{ x.dev_eyebrow }}</p>
+    <h2 class="center">{{ x.dev_title }}</h2>
+    <p class="section__lede center">{{ x.dev_lede }}</p>
+
+    <div class="cards">
+      <article class="card"><span class="card__ic">{{ x.ico_platform | safe }}</span><h3>{{ x.card1_t }}</h3><p>{{ x.card1_d }}</p></article>
+      <article class="card"><span class="card__ic">{{ x.ico_open | safe }}</span><h3>{{ x.card2_t }}</h3><p>{{ x.card2_d }}</p></article>
+      <article class="card"><span class="card__ic">{{ x.ico_privacy | safe }}</span><h3>{{ x.card3_t }}</h3><p>{{ x.card3_d }}</p></article>
+      <article class="card"><span class="card__ic">{{ x.ico_fast | safe }}</span><h3>{{ x.card4_t }}</h3><p>{{ x.card4_d }}</p></article>
+      <article class="card"><span class="card__ic">{{ x.ico_light | safe }}</span><h3>{{ x.card5_t }}</h3><p>{{ x.card5_d }}</p></article>
+      <article class="card"><span class="card__ic">{{ x.ico_secure | safe }}</span><h3>{{ x.card6_t }}</h3><p>{{ x.card6_d }}</p></article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 8 · EXAMPLE SCENARIO ============ -->
+<section class="story">
+  <div class="wrap reveal">
+    <p class="eyebrow eyebrow--center">{{ x.scen_eyebrow }}</p>
+    <h2 class="center">{{ x.scen_title }}</h2>
+    <p class="section__lede center">{{ x.scen_lede }}</p>
+
+    <ol class="strip">
+      <li class="panel" style="--i:0"><span class="panel__ic">{{ x.ico_coffee | safe }}</span><p>{{ x.scen1 }}</p></li>
+      <li class="panel" style="--i:1"><span class="panel__ic">{{ x.ico_arm | safe }}</span><p>{{ x.scen2 }}</p></li>
+      <li class="panel" style="--i:2"><span class="panel__ic">{{ x.ico_touch | safe }}</span><p>{{ x.scen3 }}</p></li>
+      <li class="panel panel--alarm" style="--i:3"><span class="panel__ic">{{ x.ico_alarm | safe }}</span><p>{{ x.scen4 }}</p></li>
+      <li class="panel" style="--i:4"><span class="panel__ic">{{ x.ico_snap | safe }}</span><p>{{ x.scen5 }}</p></li>
+      <li class="panel panel--safe" style="--i:5"><span class="panel__ic">{{ x.ico_disarm | safe }}</span><p>{{ x.scen6 }}</p></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============ 9 · INSTALL ============ -->
+<section class="band band--install" id="install">
+  <div class="wrap install__grid reveal">
+    <div class="install__copy">
+      <p class="eyebrow eyebrow--center">{{ x.install_eyebrow }}</p>
+      <h2>{{ x.install_title }}</h2>
+      <p class="section__lede">{{ x.install_lede }}</p>
+      <div class="install__rows">
+        <div class="irow"><span class="irow__k">Fedora</span><code>sudo dnf install ./alertu-*.rpm</code></div>
+        <div class="irow"><span class="irow__k">Debian · Ubuntu</span><code>sudo apt install ./alertu_*.deb</code></div>
+        <div class="irow"><span class="irow__k">{{ x.install_source }}</span><code>cargo build --release</code></div>
+      </div>
+      <p class="install__note">{{ x.install_note | safe }}</p>
+    </div>
+
+    <div class="scene scene--term">
+      <div class="term">
+        <div class="term__bar"><span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span><span class="term__title">alertu-ctl</span></div>
+<pre class="term__body"><code><span class="p">$</span> <span class="typed">alertu-ctl status</span>
 <span class="s-idle">Idle</span>
-<span class="p">$</span> alertu-ctl toggle            <span class="dim"># {{ section.extra.term_toggle }}</span>
-ok
+<span class="p">$</span> alertu-ctl toggle
+<span class="ok">ok</span>
 <span class="p">$</span> alertu-ctl --json status --watch
 {"event":"state","state":"<span class="s-armed">armed</span>"}
 {"event":"state_changed","state":"<span class="s-trig">triggered</span>"}
@@ -36,9 +318,31 @@ ok
       </div>
     </div>
   </div>
-</header>
-
-<main class="container">
-  {{ section.content | safe }}
+</section>
 </main>
+
+<!-- ============ FOOTER SCENE ============ -->
+<section class="closing">
+  <div class="wrap reveal">
+    <div class="scene scene--closing" aria-hidden="true">
+      <svg class="art" viewBox="0 0 260 150">
+        <line class="desk" x1="24" y1="128" x2="236" y2="128"/>
+        <path class="dev-base" d="M70 120h120l10 8H60z"/>
+        <rect class="dev-lid" x="82" y="46" width="96" height="82" rx="9"/>
+        <rect class="dev-screen dev-screen--safe" x="88" y="52" width="84" height="68" rx="5"/>
+        <g class="lock lock--safe" transform="translate(130 84) scale(1.05)">
+          <rect class="lock-body" x="-13" y="-2" width="26" height="21" rx="5"/>
+          <path class="lock-shackle lock-shackle--open" d="M-7 -2v-7a8 8 0 0 1 15 -2"/>
+          <path class="lock-check" d="M-4 8l3 3 6-7"/>
+        </g>
+        <!-- owner returned, seated -->
+        <g class="fig fig--back">
+          <circle cx="40" cy="96" r="9"/>
+          <path d="M28 128v-16a12 12 0 0 1 24 0v16z"/>
+        </g>
+      </svg>
+    </div>
+    <p class="closing__quote">{{ x.footer_quote_1 }}<br><span>{{ x.footer_quote_2 }}</span></p>
+  </div>
+</section>
 {% endblock content %}
