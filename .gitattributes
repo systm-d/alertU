@@ -1,0 +1,8 @@
+# Normalize line endings to LF in the repository, whatever the checkout OS.
+# This matters for the shell scriptlets: a CRLF in a maintainer script breaks it.
+* text=auto eol=lf
+
+# Binary assets — never touch their contents or diff them as text.
+*.wav binary
+*.png binary
+*.jpg binary

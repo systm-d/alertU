@@ -1,0 +1,4 @@
+# Default owner for everything in the repository. Requested for review on every
+# pull request. Add more specific lines above this one to route particular
+# paths elsewhere.
+* @kdelfour

@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# rustfmt is the authority for .rs; this only helps editors before it runs.
+[*.rs]
+indent_size = 4
+
+# YAML, web assets and the Zola templates conventionally use two spaces.
+[*.{yml,yaml,scss,css,html}]
+indent_size = 2
+
+# Markdown uses trailing whitespace for hard line breaks; leave it alone.
+[*.md]
+trim_trailing_whitespace = false

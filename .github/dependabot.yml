@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Rust dependencies across the workspace.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the routine minor/patch bumps; majors still come on their own
+      # so their breaking changes get individual review.
+      cargo-minor:
+        update-types: ["minor", "patch"]
+
+  # The action versions pinned in the workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
