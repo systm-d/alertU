@@ -103,56 +103,49 @@ term_toggle = "exactly what a remote click does"
 <section id="install">
 <p class="eyebrow">Install</p>
 
-## Built from source, today
+## A package for your distribution
 
-<p class="section__lede">There is no released package yet — a Debian package is in progress. For now, build it and install the bundled systemd units. The full walkthrough, including the tray's user unit, the icons and the desktop entry, is in the <a href="https://github.com/systm-d/alertU#install-systemd">README</a>.</p>
+<p class="section__lede">Every <a href="https://github.com/systm-d/alertU/releases">release</a> ships two packages: an <code>.rpm</code> for Fedora and a <code>.deb</code> for Debian and Ubuntu. Both bundle all four binaries, the systemd units, the sounds and the desktop entry. Neither ships a config file — the daemon writes its own on first use.</p>
 
 <div class="steps">
   <div class="step">
-    <h3>1 · Build</h3>
+    <h3>Fedora</h3>
 
 ```sh
-git clone https://github.com/systm-d/alertU
-cd alertU
-cargo build --release
-```
-
-<p>Needs a recent stable Rust toolchain. Only <code>alertu-settings</code> pulls in system build dependencies (egui links X11/Wayland/GL) — skip it with <code>--workspace --exclude alertu-settings</code>.</p>
-  </div>
-  <div class="step">
-    <h3>2 · Service account &amp; units</h3>
-
-```sh
-sudo systemd-sysusers packaging/sysusers.d/alertu.conf
-sudo install -Dm644 packaging/alertu-daemon.service \
-  /etc/systemd/system/alertu-daemon.service
-sudo alertu-ctl gen-sounds --dir /usr/share/sounds/alertu
+sudo dnf install ./alertu-0.2.0-1.x86_64.rpm
 sudo systemctl enable --now alertu-daemon
 ```
 
-<p>The daemon's own account is the one that needs <code>input</code> and <code>video</code>; yours needs neither.</p>
+<p>Fedora 40 or newer. The package follows Fedora policy and leaves the daemon disabled, so the second line is yours to run.</p>
   </div>
   <div class="step">
-    <h3>3 · Join the socket's group</h3>
+    <h3>Debian &amp; Ubuntu</h3>
 
 ```sh
-sudo usermod -aG alertu "$USER"
-# then start a new session, or: newgrp alertu
+sudo apt install ./alertu_0.2.0-1_amd64.deb
 ```
 
-<p>The socket is <code>0660</code>. Without that group the tray, the settings window and <code>alertu-ctl</code> all fail to connect.</p>
+<p>Debian 13 or Ubuntu 24.04, or newer. This one starts the daemon for you.</p>
   </div>
   <div class="step">
-    <h3>4 · External helpers</h3>
+    <h3>Then, on either</h3>
 
 ```sh
-# snapshots: one of
-fswebcam  |  ffmpeg
-# audio: one of
-paplay  |  pw-play  |  aplay  |  ffplay  |  play
+sudo usermod -aG alertu "$USER"     # then start a new session
+systemctl --user enable --now alertu-gui
 ```
 
-<p>AlertU shells out to these rather than linking them, so pick whichever your distribution already ships.</p>
+<p>The socket is <code>0660</code>: without that group the tray, the settings window and <code>alertu-ctl</code> cannot connect. A package cannot add you to a group, nor enable a unit in your user session — so both lines are yours.</p>
+  </div>
+  <div class="step">
+    <h3>Any other distribution</h3>
+
+```sh
+git clone https://github.com/systm-d/alertU
+cd alertU && cargo build --release
+```
+
+<p>Then install the bundled systemd units by hand — the full walkthrough is in the <a href="https://github.com/systm-d/alertU#install-systemd">README</a>. Only <code>alertu-settings</code> needs system build dependencies.</p>
   </div>
 </div>
 
