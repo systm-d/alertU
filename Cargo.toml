@@ -8,8 +8,8 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 authors = ["Systm D"]
-repository = "https://github.com/systm-d/alertu"
-homepage = "https://github.com/systm-d/alertu"
+repository = "https://github.com/systm-d/alertU"
+homepage = "https://systm-d.github.io/alertU/"
 
 [workspace.dependencies]
 anyhow = "1"
