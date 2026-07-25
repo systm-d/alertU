@@ -27,6 +27,13 @@ fn is_replay_safe(req: &Request) -> bool {
             true
         }
         Request::Arm | Request::Disarm | Request::Toggle | Request::Subscribe => false,
+        // Idempotent — pairing writes nothing — but replaying it silently opens
+        // a second listening window, so the user would be waiting to press a
+        // button with no dialog telling them the first attempt is gone.
+        Request::LearnRemote { .. } => false,
+        // Worst case a replay is one extra chirp, and the point of asking is to
+        // hear one.
+        Request::TestSound => true,
     }
 }
 
@@ -44,6 +51,17 @@ fn connect_hint(kind: std::io::ErrorKind) -> &'static str {
     } else {
         "is alertu-daemon running?"
     }
+}
+
+/// A remote identified by pressing one of its buttons.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LearnedRemote {
+    /// evdev node the press came from.
+    pub path: PathBuf,
+    /// Device name reported by the kernel.
+    pub name: String,
+    /// evdev key name of the button, e.g. `KEY_VOLUMEUP`.
+    pub key: String,
 }
 
 /// A live connection to `alertu-daemon`.
@@ -171,6 +189,28 @@ impl Client {
             Response::Error { message } => Err(anyhow!(message)),
             other => Err(anyhow!("unexpected reply to SetConfig: {other:?}")),
         }
+    }
+
+    /// Watch every input device and report the first button press.
+    ///
+    /// Blocks for up to `timeout_secs`: the daemon answers only once a key
+    /// arrives or the window closes, so a caller that draws a UI must run this
+    /// off its drawing thread.
+    ///
+    /// `Ok(None)` is the window closing with nothing pressed — a normal outcome
+    /// (the user reconsidered, or the remote was asleep), not a failure.
+    pub fn learn_remote(&mut self, timeout_secs: u64) -> Result<Option<LearnedRemote>> {
+        match self.round_trip(&Request::LearnRemote { timeout_secs })? {
+            Response::Learned { path, name, key } => Ok(Some(LearnedRemote { path, name, key })),
+            Response::LearnTimedOut => Ok(None),
+            Response::Error { message } => Err(anyhow!(message)),
+            other => Err(anyhow!("unexpected reply to LearnRemote: {other:?}")),
+        }
+    }
+
+    /// Play the beep through the daemon, to check the alarm is audible.
+    pub fn test_sound(&mut self) -> Result<()> {
+        self.expect_ok(&Request::TestSound)
     }
 
     /// Force-arm, locking the session.

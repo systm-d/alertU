@@ -1,0 +1,24 @@
+// Let the AlertU daemon lock and unlock the graphical session.
+//
+// Without this rule the daemon's `loginctl lock-session <id>` fails with
+// "Interactive authentication required" and nothing ever locks — which is the
+// whole point of the program. The daemon runs as the `alertu` system user
+// (User=alertu in alertu-daemon.service), so acting on another user's session
+// is the privileged action org.freedesktop.login1.lock-sessions, and systemd
+// ships it as auth_admin_keep for every subject.
+//
+// Scope worth being explicit about: that single action is documented as "Lock
+// or unlock active sessions" — logind exposes no separate action for locking
+// alone. Granting it therefore also lets `alertu` *unlock* the session without
+// authenticating, which AlertU relies on to disarm. Anyone who achieves code
+// execution as `alertu` can unlock the screen; the trade is inherent to the
+// design, not to this file.
+//
+// The `49-` prefix keeps this ahead of polkit's own 50-default.rules.
+
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.login1.lock-sessions" &&
+        subject.user == "alertu") {
+        return polkit.Result.YES;
+    }
+});

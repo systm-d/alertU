@@ -86,11 +86,15 @@ async fn spawn_machine(cfg: Config, cfg_path: PathBuf) -> Running {
     let injector = sig_tx.clone();
 
     let session = SessionCtl::new(&cfg).await;
+    // Built before the call: `cfg` is moved into `Machine::new`, and arguments
+    // are evaluated left to right, so borrowing it in a later argument would
+    // be a use-after-move.
+    let sound = SoundPlayer::new(&cfg);
     let machine = Machine::new(
         cfg,
         cfg_path,
         session,
-        SoundPlayer::new(),
+        sound,
         Privileges::default(),
         Channels {
             state_tx,

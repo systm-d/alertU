@@ -30,6 +30,12 @@ pub struct Config {
 
     /// evdev key name that arms/disarms, e.g. `KEY_VOLUMEUP` or `KEY_ENTER`.
     /// Any of the listed keys coming from the remote acts as the toggle.
+    ///
+    /// A name the remote cannot emit is not an error anywhere — it simply never
+    /// matches, and the remote stays inert — so the daemon warns about that at
+    /// startup (see `input::warn_about_unusable_keys`). Cheap Bluetooth
+    /// shutters, the typical hardware here, mostly report `KEY_VOLUMEUP` and no
+    /// `KEY_ENTER` at all, hence the default.
     pub toggle_keys: Vec<String>,
 
     /// Devices watched for intrusion while armed. Either an explicit list of
@@ -54,6 +60,19 @@ pub struct Config {
     /// Audio file looped while in the `Alarm` state.
     pub siren_sound: PathBuf,
 
+    /// ALSA device the sounds play on, e.g. `plughw:0,2`. Empty (the default)
+    /// lets whichever player is found pick its own destination.
+    ///
+    /// Worth setting on a packaged install. The daemon runs as its own system
+    /// user, and `paplay`/`pw-play` can only reach a PipeWire/PulseAudio server
+    /// that lives *inside a user session* — which this user does not have, so
+    /// they fail with "Host is down" and the alarm is mute. Naming an ALSA
+    /// device routes playback straight at the hardware instead, which is what
+    /// makes a system service audible at all. `aplay -L` lists the candidates;
+    /// prefer the built-in speaker over a headset, since a siren playing into
+    /// headphones on the desk protects nothing.
+    pub alsa_device: String,
+
     /// Directory where webcam snapshots are written on `Alarm`.
     pub snapshot_dir: PathBuf,
 
@@ -74,13 +93,14 @@ impl Default for Config {
         Config {
             remote_device: AUTO.to_string(),
             remote_name_hint: String::new(),
-            toggle_keys: vec!["KEY_ENTER".to_string()],
+            toggle_keys: vec!["KEY_VOLUMEUP".to_string()],
             watch_devices: vec![AUTO.to_string()],
             grace_period_secs: 15,
             alarm_delay_secs: 10,
             beep_sound: PathBuf::from("/usr/share/sounds/alertu/beep.wav"),
             warning_sound: PathBuf::from("/usr/share/sounds/alertu/warning.wav"),
             siren_sound: PathBuf::from("/usr/share/sounds/alertu/siren.wav"),
+            alsa_device: String::new(),
             snapshot_dir: PathBuf::from("/var/lib/alertu/snapshots"),
             camera_device: "/dev/video0".to_string(),
             session_id: AUTO.to_string(),
@@ -141,6 +161,28 @@ impl Config {
         Ok(())
     }
 
+    /// Point this config at a remote learned by pressing its button.
+    ///
+    /// Matches the remote by *name* rather than by node path: a Bluetooth remote
+    /// drops off the bus when it sleeps and can return as a different
+    /// `/dev/input/eventN`, which would silently unpair a path-pinned config. The
+    /// path is used only when the kernel reports no usable name — mid-reconnect
+    /// it can briefly be `?`.
+    ///
+    /// `toggle_keys` becomes exactly the key that was pressed. Keeping any
+    /// previous entry would defeat the point: a key the remote cannot emit never
+    /// matches, and that dead end is what guided pairing exists to remove.
+    pub fn apply_learned_remote(&mut self, path: &Path, name: &str, key: &str) {
+        let hint = name.trim();
+        if hint.is_empty() || hint == "?" || hint == "<unnamed>" {
+            self.remote_device = path.to_string_lossy().into_owned();
+        } else {
+            self.remote_device = AUTO.to_string();
+            self.remote_name_hint = hint.to_string();
+        }
+        self.toggle_keys = vec![key.to_string()];
+    }
+
     /// Basic sanity validation of user-provided values.
     pub fn validate(&self) -> Result<()> {
         if self.toggle_keys.is_empty() {
@@ -181,6 +223,37 @@ mod tests {
             ..Default::default()
         };
         assert!(!cfg.watch_is_auto());
+    }
+
+    #[test]
+    fn a_named_learned_remote_is_matched_by_name() {
+        let mut cfg = Config::default();
+        cfg.apply_learned_remote(
+            Path::new("/dev/input/event16"),
+            "AB Shutter 6",
+            "KEY_VOLUMEUP",
+        );
+        assert_eq!(cfg.remote_device, AUTO);
+        assert_eq!(cfg.remote_name_hint, "AB Shutter 6");
+        assert_eq!(cfg.toggle_keys, vec!["KEY_VOLUMEUP".to_string()]);
+    }
+
+    #[test]
+    fn an_unnamed_learned_remote_falls_back_to_its_path() {
+        let mut cfg = Config::default();
+        cfg.apply_learned_remote(Path::new("/dev/input/event16"), "?", "KEY_SELECT");
+        assert_eq!(cfg.remote_device, "/dev/input/event16");
+        assert_eq!(cfg.toggle_keys, vec!["KEY_SELECT".to_string()]);
+    }
+
+    #[test]
+    fn learning_replaces_previously_configured_keys() {
+        let mut cfg = Config {
+            toggle_keys: vec!["KEY_ENTER".to_string(), "KEY_A".to_string()],
+            ..Default::default()
+        };
+        cfg.apply_learned_remote(Path::new("/dev/input/event1"), "Remote", "KEY_UP");
+        assert_eq!(cfg.toggle_keys, vec!["KEY_UP".to_string()]);
     }
 
     #[test]

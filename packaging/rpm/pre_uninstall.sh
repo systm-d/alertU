@@ -9,5 +9,7 @@ set -e
 
 if [ "$1" -eq 0 ]; then
     systemctl --no-reload disable --now alertu-daemon.service >/dev/null 2>&1 || true
+    # The tray's user unit, enabled for every account by %post.
+    systemctl --global disable alertu-gui.service >/dev/null 2>&1 || true
 fi
 exit 0

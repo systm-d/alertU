@@ -7,6 +7,7 @@
 pub mod config;
 pub mod devices;
 pub mod gen_sounds;
+pub mod pair;
 pub mod state;
 
 use crate::error::CliError;

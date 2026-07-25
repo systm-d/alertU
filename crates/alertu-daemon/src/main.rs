@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
 
     let session = SessionCtl::new(&cfg).await;
     info!(session = %session.id(), "controlling logind session");
-    let sound = SoundPlayer::new();
+    let sound = SoundPlayer::new(&cfg);
 
     // Session lock-state observation: D-Bus when available, polling otherwise.
     tokio::spawn(session::watch(

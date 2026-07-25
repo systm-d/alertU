@@ -1,22 +1,48 @@
 //! The StatusNotifierItem tray and its menu.
 //!
-//! The menu doubles as the "settings window": it reflects the current state and
-//! lets the user pick the remote, choose watched devices, and nudge the tunable
-//! delays. Menu callbacks never block — they queue a [`Request`] on an unbounded
-//! channel, drained by the session loop in `main.rs`, and optimistically update
-//! the local config so the menu redraws immediately.
+//! The menu is deliberately four entries: state, arm/disarm, pair, settings, quit.
+//! It used to double as the settings window — device pickers, watch-list
+//! checkboxes and delay nudges in nested submenus — which put a dozen choices in
+//! front of a tray click. Those all live in `alertu-settings` now, under
+//! "Advanced settings"; a tray menu is for the things you do while walking away
+//! from the desk.
+//!
+//! Menu callbacks never block — they queue a [`Request`] on an unbounded channel,
+//! drained by the session loop in `main.rs`, and optimistically update the local
+//! config so the menu redraws immediately.
 //!
 //! While the daemon is unreachable, queued requests are dropped rather than
 //! replayed, so the action items are disabled and the tooltip says so.
 
-use alertu_common::config::{AUTO, Config};
+use alertu_common::config::Config;
 use alertu_common::protocol::{InputDeviceInfo, Request};
 use alertu_common::state::GuardState;
-use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
+use ksni::menu::StandardItem;
 use ksni::{Category, Icon, MenuItem, Status, ToolTip, Tray};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
+
+/// How long the daemon listens for a button press during pairing.
+///
+/// Long enough to pick the remote up off the desk, short enough that a dialog
+/// left open does not keep readers on every input device all afternoon.
+const PAIRING_WINDOW_SECS: u64 = 30;
+
+/// Where a pairing attempt stands, so the menu can say what to do next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pairing {
+    /// Nothing attempted yet this session.
+    Idle,
+    /// Waiting for the user to press a button.
+    Waiting,
+    /// A key was learned and written to the daemon.
+    Done { name: String, key: String },
+    /// The window closed with no press.
+    NothingPressed,
+    /// The daemon refused (armed, or nothing to listen on).
+    Refused,
+}
 
 /// The tray model. ksni calls the trait methods on its own task; we mutate it
 /// only through `Handle::update`.
@@ -30,6 +56,8 @@ pub struct AlertuTray {
     /// Whether the daemon connection is currently up. Actions that would send a
     /// request are disabled while it is down, since those requests are dropped.
     pub connected: bool,
+    /// State of the guided pairing flow.
+    pub pairing: Pairing,
 }
 
 impl AlertuTray {
@@ -41,6 +69,51 @@ impl AlertuTray {
             req_tx,
             socket,
             connected: false,
+            pairing: Pairing::Idle,
+        }
+    }
+
+    /// Ask the daemon to watch for a button press.
+    fn start_pairing(&mut self) {
+        self.pairing = Pairing::Waiting;
+        self.send(Request::LearnRemote {
+            timeout_secs: PAIRING_WINDOW_SECS,
+        });
+    }
+
+    /// Record the outcome of a pairing attempt and, on success, save it.
+    ///
+    /// `None` means the window closed with nothing pressed.
+    pub fn finish_pairing(&mut self, learned: Option<(PathBuf, String, String)>) {
+        let Some((path, name, key)) = learned else {
+            self.pairing = Pairing::NothingPressed;
+            return;
+        };
+        match self.cfg.as_mut() {
+            Some(cfg) => {
+                cfg.apply_learned_remote(&path, &name, &key);
+                let snapshot = cfg.clone();
+                self.send(Request::SetConfig(Box::new(snapshot)));
+                self.pairing = Pairing::Done { name, key };
+            }
+            None => {
+                // Nothing to fold the press into yet. Ask for the config so the
+                // next attempt lands, rather than reporting a success that was
+                // never written.
+                warn!("learned a remote before the config arrived; re-requesting it");
+                self.send(Request::GetConfig);
+                self.pairing = Pairing::Refused;
+            }
+        }
+    }
+
+    /// A pairing attempt the daemon refused.
+    ///
+    /// Only meaningful while waiting: an unrelated error must not rewrite the
+    /// result of a pairing that already finished.
+    pub fn fail_pairing(&mut self) {
+        if self.pairing == Pairing::Waiting {
+            self.pairing = Pairing::Refused;
         }
     }
 
@@ -59,32 +132,6 @@ impl AlertuTray {
         {
             Ok(_) => {}
             Err(e) => warn!(error = %e, "could not launch alertu-settings (is it on PATH?)"),
-        }
-    }
-
-    /// The path currently configured as the remote (empty when "auto").
-    fn remote_path(&self) -> Option<PathBuf> {
-        match &self.cfg {
-            Some(cfg) if !cfg.remote_is_auto() => Some(PathBuf::from(&cfg.remote_device)),
-            _ => None,
-        }
-    }
-
-    /// The effective set of watched device paths, mirroring the daemon's
-    /// resolution so toggling from "auto" produces a sensible explicit list.
-    fn effective_watch(&self) -> Vec<PathBuf> {
-        let Some(cfg) = &self.cfg else {
-            return Vec::new();
-        };
-        let remote = self.remote_path();
-        if cfg.watch_is_auto() {
-            self.devices
-                .iter()
-                .filter(|d| !d.is_pointer && Some(&d.path) != remote.as_ref())
-                .map(|d| d.path.clone())
-                .collect()
-        } else {
-            cfg.watch_devices.iter().map(PathBuf::from).collect()
         }
     }
 }
@@ -170,28 +217,13 @@ impl Tray for AlertuTray {
             .into(),
         );
 
-        items.push(MenuItem::Separator);
-        items.push(self.remote_submenu());
-        items.push(self.watch_submenu());
-        items.push(self.settings_submenu());
+        items.push(self.pairing_item());
         items.push(MenuItem::Separator);
 
         items.push(
             StandardItem {
-                label: "Open settings…".into(),
+                label: "Settings…".into(),
                 activate: Box::new(|tray: &mut AlertuTray| tray.launch_settings()),
-                ..Default::default()
-            }
-            .into(),
-        );
-        items.push(
-            StandardItem {
-                label: "Refresh devices".into(),
-                enabled: self.connected,
-                activate: Box::new(|tray: &mut AlertuTray| {
-                    tray.send(Request::ListDevices);
-                    tray.send(Request::GetConfig);
-                }),
                 ..Default::default()
             }
             .into(),
@@ -210,176 +242,25 @@ impl Tray for AlertuTray {
 }
 
 impl AlertuTray {
-    /// Submenu to pick the remote device (radio-style, marked with a bullet).
-    fn remote_submenu(&self) -> MenuItem<Self> {
-        let mut sub: Vec<MenuItem<Self>> = Vec::new();
-        let current = self.remote_path();
-        let auto = self.cfg.as_ref().is_some_and(|c| c.remote_is_auto());
-
-        sub.push(
-            StandardItem {
-                label: format!("{}Auto (by name hint)", mark(auto)),
-                activate: Box::new(|tray: &mut AlertuTray| {
-                    if let Some(cfg) = tray.cfg.as_mut() {
-                        cfg.remote_device = AUTO.into();
-                        let snapshot = cfg.clone();
-                        tray.send(Request::SetConfig(Box::new(snapshot)));
-                    }
-                }),
-                ..Default::default()
-            }
-            .into(),
-        );
-
-        for dev in &self.devices {
-            let selected = current.as_ref() == Some(&dev.path);
-            let path = dev.path.clone();
-            let label = format!(
-                "{}{}{}",
-                mark(selected),
-                dev.name,
-                if dev.is_pointer { "  [pointer]" } else { "" }
-            );
-            sub.push(
-                StandardItem {
-                    label,
-                    activate: Box::new(move |tray: &mut AlertuTray| {
-                        if let Some(cfg) = tray.cfg.as_mut() {
-                            cfg.remote_device = path.to_string_lossy().into_owned();
-                            let snapshot = cfg.clone();
-                            tray.send(Request::SetConfig(Box::new(snapshot)));
-                        }
-                    }),
-                    ..Default::default()
-                }
-                .into(),
-            );
-        }
-
-        if self.devices.is_empty() {
-            sub.push(info_item("(no devices — click Refresh)"));
-        }
-
-        SubMenu {
-            label: "Remote device".into(),
-            submenu: sub,
-            ..Default::default()
-        }
-        .into()
-    }
-
-    /// Submenu to pick watched devices (checkmarks). Toggling any device
-    /// switches the config to an explicit list.
-    fn watch_submenu(&self) -> MenuItem<Self> {
-        let mut sub: Vec<MenuItem<Self>> = Vec::new();
-        let auto = self.cfg.as_ref().is_some_and(|c| c.watch_is_auto());
-        let watched = self.effective_watch();
-        let remote = self.remote_path();
-
-        sub.push(info_item(if auto {
-            "Mode: auto (all except remote & mouse)"
-        } else {
-            "Mode: explicit selection"
-        }));
-
-        for dev in &self.devices {
-            if Some(&dev.path) == remote.as_ref() {
-                continue; // the remote is never watched
-            }
-            let checked = watched.contains(&dev.path);
-            let path = dev.path.clone();
-            sub.push(
-                CheckmarkItem {
-                    label: format!(
-                        "{}{}",
-                        dev.name,
-                        if dev.is_pointer { "  [pointer]" } else { "" }
-                    ),
-                    checked,
-                    activate: Box::new(move |tray: &mut AlertuTray| {
-                        let mut set = tray.effective_watch();
-                        if let Some(pos) = set.iter().position(|p| p == &path) {
-                            set.remove(pos);
-                        } else {
-                            set.push(path.clone());
-                        }
-                        if let Some(cfg) = tray.cfg.as_mut() {
-                            cfg.watch_devices = set
-                                .iter()
-                                .map(|p| p.to_string_lossy().into_owned())
-                                .collect();
-                            if cfg.watch_devices.is_empty() {
-                                cfg.watch_devices = vec![AUTO.into()];
-                            }
-                            let snapshot = cfg.clone();
-                            tray.send(Request::SetConfig(Box::new(snapshot)));
-                        }
-                    }),
-                    ..Default::default()
-                }
-                .into(),
-            );
-        }
-
-        if self.devices.is_empty() {
-            sub.push(info_item("(no devices — click Refresh)"));
-        }
-
-        SubMenu {
-            label: "Watch devices".into(),
-            submenu: sub,
-            ..Default::default()
-        }
-        .into()
-    }
-
-    /// Submenu for the tunable delays plus read-only paths.
-    fn settings_submenu(&self) -> MenuItem<Self> {
-        let mut sub: Vec<MenuItem<Self>> = Vec::new();
-        let cfg = self.cfg.clone();
-
-        match &cfg {
-            Some(cfg) => {
-                sub.push(info_item(&format!(
-                    "Alarm delay: {} s",
-                    cfg.alarm_delay_secs
-                )));
-                sub.push(delta_item("  + increase alarm delay", |c| {
-                    c.alarm_delay_secs = c.alarm_delay_secs.saturating_add(1);
-                }));
-                sub.push(delta_item("  − decrease alarm delay", |c| {
-                    c.alarm_delay_secs = c.alarm_delay_secs.saturating_sub(1).max(1);
-                }));
-
-                sub.push(info_item(&format!(
-                    "Grace period: {} s",
-                    cfg.grace_period_secs
-                )));
-                sub.push(delta_item("  + increase grace period", |c| {
-                    c.grace_period_secs = c.grace_period_secs.saturating_add(1);
-                }));
-                sub.push(delta_item("  − decrease grace period", |c| {
-                    c.grace_period_secs = c.grace_period_secs.saturating_sub(1);
-                }));
-
-                sub.push(MenuItem::Separator);
-                sub.push(info_item(&format!("Camera: {}", cfg.camera_device)));
-                sub.push(info_item(&format!(
-                    "Snapshots: {}",
-                    cfg.snapshot_dir.display()
-                )));
-                sub.push(info_item(&format!("Siren: {}", cfg.siren_sound.display())));
-                sub.push(info_item(&format!(
-                    "Toggle keys: {}",
-                    cfg.toggle_keys.join(", ")
-                )));
-            }
-            None => sub.push(info_item("(config not loaded)")),
-        }
-
-        SubMenu {
-            label: "Settings".into(),
-            submenu: sub,
+    /// The one-click pairing entry.
+    ///
+    /// Top level rather than buried in the "Remote device" submenu, because this
+    /// is the path that replaces the old one: read `list-devices`, work out
+    /// which node is the remote, then guess the evdev name of the key it sends.
+    /// Getting that last part wrong produced no error anywhere — just a remote
+    /// that never armed — so pressing the button is the only reliable answer.
+    fn pairing_item(&self) -> MenuItem<Self> {
+        let label = match &self.pairing {
+            Pairing::Waiting => return info_item("Press a button on your remote…"),
+            Pairing::Idle => "Pair remote…".to_string(),
+            Pairing::Done { name, key } => format!("Paired: {name} ({key}) — pair again"),
+            Pairing::NothingPressed => "No button detected — pair again".to_string(),
+            Pairing::Refused => "Pairing failed — disarm, then pair again".to_string(),
+        };
+        StandardItem {
+            label,
+            enabled: self.connected,
+            activate: Box::new(|tray: &mut AlertuTray| tray.start_pairing()),
             ..Default::default()
         }
         .into()
@@ -396,23 +277,64 @@ fn info_item(label: &str) -> MenuItem<AlertuTray> {
     .into()
 }
 
-/// A menu row that mutates the config and pushes it to the daemon.
-fn delta_item(label: &str, apply: fn(&mut Config)) -> MenuItem<AlertuTray> {
-    StandardItem {
-        label: label.to_string(),
-        activate: Box::new(move |tray: &mut AlertuTray| {
-            if let Some(cfg) = tray.cfg.as_mut() {
-                apply(cfg);
-                let snapshot = cfg.clone();
-                tray.send(Request::SetConfig(Box::new(snapshot)));
-            }
-        }),
-        ..Default::default()
-    }
-    .into()
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc::unbounded_channel;
 
-/// Bullet prefix marking the currently-selected radio option.
-fn mark(selected: bool) -> &'static str {
-    if selected { "● " } else { "  " }
+    fn tray() -> AlertuTray {
+        let (tx, _rx) = unbounded_channel();
+        AlertuTray::new(tx, PathBuf::from("/run/alertu/alertu.sock"))
+    }
+
+    #[test]
+    fn a_learned_press_is_saved_and_reported() {
+        let mut t = tray();
+        t.cfg = Some(Config::default());
+        t.finish_pairing(Some((
+            PathBuf::from("/dev/input/event16"),
+            "AB Shutter 6".to_string(),
+            "KEY_VOLUMEUP".to_string(),
+        )));
+        assert_eq!(
+            t.pairing,
+            Pairing::Done {
+                name: "AB Shutter 6".to_string(),
+                key: "KEY_VOLUMEUP".to_string(),
+            }
+        );
+        let cfg = t.cfg.expect("config kept");
+        assert_eq!(cfg.remote_name_hint, "AB Shutter 6");
+        assert_eq!(cfg.toggle_keys, vec!["KEY_VOLUMEUP".to_string()]);
+    }
+
+    #[test]
+    fn a_press_arriving_before_the_config_is_not_reported_as_paired() {
+        let mut t = tray();
+        assert!(t.cfg.is_none());
+        t.finish_pairing(Some((
+            PathBuf::from("/dev/input/event16"),
+            "Remote".to_string(),
+            "KEY_UP".to_string(),
+        )));
+        // Nothing was written, so claiming success would be a lie.
+        assert_eq!(t.pairing, Pairing::Refused);
+    }
+
+    #[test]
+    fn an_empty_window_says_no_button_was_pressed() {
+        let mut t = tray();
+        t.cfg = Some(Config::default());
+        t.finish_pairing(None);
+        assert_eq!(t.pairing, Pairing::NothingPressed);
+    }
+
+    #[test]
+    fn an_unrelated_error_does_not_rewrite_a_finished_pairing() {
+        let mut t = tray();
+        t.cfg = Some(Config::default());
+        t.finish_pairing(None);
+        t.fail_pairing();
+        assert_eq!(t.pairing, Pairing::NothingPressed);
+    }
 }

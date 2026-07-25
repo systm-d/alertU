@@ -3,7 +3,7 @@
 # once the operation finishes: 1 on a fresh install, 2 during an upgrade.
 set -e
 
-# The service account and its input/video groups. Shipped as a sysusers.d
+# The service account and its input/video/audio groups. Shipped as a sysusers.d
 # fragment so systemd owns the definition; this applies it now instead of
 # waiting for the next boot.
 #
@@ -42,6 +42,12 @@ if [ "$1" -eq 1 ]; then
     # so this leaves the daemon disabled and the user enables it -- see the
     # message below and README.Fedora.
     systemctl preset alertu-daemon.service >/dev/null 2>&1 || true
+
+    # Same convention for the tray, one scope out: `--global` covers systemd user
+    # instances started after this point, so it needs no access to the user
+    # instance of whoever is logged in. Under Fedora's default policy this leaves
+    # it disabled, like the daemon — the message below says how to turn both on.
+    systemctl --global preset alertu-gui.service >/dev/null 2>&1 || true
 fi
 
 if [ -x /usr/bin/gtk-update-icon-cache ]; then
@@ -58,23 +64,29 @@ enabling third-party units, so start it yourself:
 
     sudo systemctl enable --now alertu-daemon
 
-Its control socket is mode 0660, owned by the `alertu` group. Connecting to it
-grants full command of the alarm, so membership is a privilege grant -- which is
-also why this package cannot grant it for you. Add yourself:
-
-    sudo usermod -aG alertu <user>
-
-then log out and back in. Until you do, the tray, the settings window and
-alertu-ctl will not be able to reach the daemon.
-
-The tray is shipped but not started: it is a user service, and a package must
-not touch your systemd user instance. Once logged back in, run:
+The tray follows the same preset policy, so turn it on for your account:
 
     systemctl --user enable --now alertu-gui
 
-No remote is configured yet. Run `alertu-ctl list-devices`, then set
-`remote_name_hint` to part of your remote's name. See
-/usr/share/doc/alertu/config.example.toml.
+The rest needs no terminal:
+
+  1. Open "AlertU -- Settings" from your applications menu. If it says this
+     account may not control AlertU, click "Authorize this account" -- one
+     password prompt. (The control socket is 0660 and group-owned, and no
+     package may add an existing account to a group, so this is the one step
+     that has to be a deliberate act. Log out and back in afterwards.)
+
+  2. Click "Pair remote" in the tray menu or the settings window, then press a
+     button on your remote. AlertU works out both the device and the key by
+     itself -- a key the remote cannot send is the classic reason a paired
+     remote does nothing.
+
+  3. If you want the siren audible, set the ALSA device in the settings window.
+     The daemon has no user session of its own, so it cannot reach PipeWire or
+     PulseAudio; `aplay -L` lists the devices, and the built-in speaker is the
+     one that protects anything.
+
+See /usr/share/doc/alertu/config.example.toml for every setting.
 
 EOF
 fi

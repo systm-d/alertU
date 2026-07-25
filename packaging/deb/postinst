@@ -3,7 +3,7 @@ set -e
 
 case "$1" in
 configure)
-    # The service account and its input/video groups. Shipped as a
+    # The service account and its input/video/audio groups. Shipped as a
     # sysusers.d fragment so systemd owns the definition; this just applies it
     # now instead of waiting for the next boot.
     if [ -x /usr/bin/systemd-sysusers ] || [ -x /bin/systemd-sysusers ]; then
@@ -17,6 +17,16 @@ configure)
     mkdir -p /etc/alertu
     chown alertu:alertu /etc/alertu 2>/dev/null || true
     chmod 0755 /etc/alertu
+
+    # Enable the tray for every account, present and future. `--global` writes
+    # to /etc/systemd/user and applies to systemd user instances started after
+    # this point, which is why it is a package-safe operation where touching a
+    # running user instance would not be: this script has no business writing
+    # into the instance of whoever happens to be logged in. Sessions already
+    # open therefore pick it up at their next login.
+    if [ -x /usr/bin/systemctl ] || [ -x /bin/systemctl ]; then
+        systemctl --global enable alertu-gui.service >/dev/null 2>&1 || true
+    fi
 
     if [ -x /usr/bin/gtk-update-icon-cache ]; then
         gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
@@ -38,25 +48,31 @@ configure)
     if [ -z "$2" ]; then
         cat <<'EOF'
 
-AlertU has been installed and its services have been configured.
+AlertU has been installed, its services are configured, and the tray is enabled
+for every account.
 
-Its control socket is mode 0660, owned by the `alertu` group. Connecting to it
-grants full command of the alarm, so membership is a privilege grant — which is
-also why this package cannot grant it for you. Add yourself:
+Log out and back in. Two things only take effect in a new session: the tray
+starts, and any group you were added to below applies.
 
-    sudo usermod -aG alertu <user>
+Then finish in the interface, with no terminal:
 
-then log out and back in. Until you do, the tray, the settings window and
-alertu-ctl will not be able to reach the daemon.
+  1. Open "AlertU — Settings" from your applications menu. If it says this
+     account may not control AlertU, click "Authorize this account" — one
+     password prompt. (The control socket is 0660 and group-owned, and no
+     package may add an existing account to a group, so this is the one step
+     that has to be a deliberate act. Log out and back in afterwards.)
 
-The tray is shipped but not started: it is a user service, and a package must
-not touch your systemd user instance. Once logged back in, run:
+  2. Click "Pair remote" in the tray menu or the settings window, then press a
+     button on your remote. AlertU works out both the device and the key by
+     itself — a key the remote cannot send is the classic reason a paired remote
+     does nothing.
 
-    systemctl --user enable --now alertu-gui
+  3. If you want the siren audible, set the ALSA device in the settings window.
+     The daemon has no user session of its own, so it cannot reach PipeWire or
+     PulseAudio; `aplay -L` lists the devices, and the built-in speaker is the
+     one that protects anything.
 
-No remote is configured yet. Run `alertu-ctl list-devices`, then set
-`remote_name_hint` to part of your remote's name. See
-/usr/share/doc/alertu/config.example.toml.
+See /usr/share/doc/alertu/config.example.toml for every setting.
 
 EOF
     fi

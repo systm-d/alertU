@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  The action behind the settings window's "Authorize this account" button.
+
+  It exists so joining the daemon's group is a dialog rather than a terminal:
+  a package may not add an existing account to a group, and the alternative was
+  telling every user to run `sudo usermod -aG alertu $USER` by hand.
+
+  `exec.path` pins the action to one helper that takes no arguments and reads the
+  account to add from PKEXEC_UID, so it can only ever grant the group to whoever
+  clicked. Without that pinning this would be a password-protected "add anybody
+  to the group that commands the alarm".
+
+  auth_admin, not auth_admin_keep: granting command of the alarm is a rare,
+  deliberate act, and caching it would let a later prompt through unnoticed.
+-->
+<policyconfig>
+  <vendor>AlertU</vendor>
+  <vendor_url>https://github.com/systm-d/alertU</vendor_url>
+
+  <action id="dev.systm-d.alertu.authorize-user">
+    <description>Authorize this account to control AlertU</description>
+    <message>Authentication is required to let this account command the AlertU alarm.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/alertu/alertu-authorize</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

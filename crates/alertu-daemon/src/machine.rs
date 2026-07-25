@@ -10,6 +10,7 @@
 
 use crate::devices;
 use crate::input::{self, InputSignal};
+use crate::learn;
 use crate::perms::Privileges;
 use crate::session::SessionCtl;
 use crate::snapshot;
@@ -40,7 +41,17 @@ pub enum Control {
     Rescan,
     GetConfig(oneshot::Sender<Config>),
     SetConfig(Box<Config>, oneshot::Sender<Result<(), String>>),
+    /// Watch every device for one key press, so a client can pair a remote.
+    LearnRemote(Duration, oneshot::Sender<Result<learn::Outcome, String>>),
+    /// Play the beep once, to prove the configured output is audible.
+    TestSound,
 }
+
+/// Bounds on the pairing window a client may ask for.
+///
+/// A dialog needs long enough for someone to pick the remote up, and no client
+/// has a reason to pin readers on every input device for longer than that.
+const LEARN_WINDOW: std::ops::RangeInclusive<u64> = 1..=120;
 
 /// Owned, single-threaded state of the alarm.
 pub struct Machine {
@@ -191,7 +202,35 @@ impl Machine {
                 let reply = self.apply_config(*cfg).await;
                 let _ = tx.send(reply);
             }
+            Control::LearnRemote(window, tx) => self.learn_remote(window, tx),
+            Control::TestSound => {
+                info!("playing the beep on request");
+                self.sound.play_once(&self.cfg.beep_sound);
+            }
         }
+    }
+
+    /// Start a detached pairing attempt.
+    ///
+    /// Detached on purpose: the window is tens of seconds, and blocking the
+    /// machine for it would stall `status`, `arm` and `disarm` for every client
+    /// while one of them sits in a pairing dialog.
+    fn learn_remote(&self, window: Duration, tx: oneshot::Sender<Result<learn::Outcome, String>>) {
+        // While armed, the keypress being learned is also an intrusion, and the
+        // watched-device readers would fire the countdown mid-pairing. Refusing
+        // is clearer than silently disarming something the user armed.
+        if self.state != GuardState::Idle {
+            let _ = tx.send(Err(format!(
+                "cannot pair a remote while {}; disarm first",
+                self.state
+            )));
+            return;
+        }
+
+        let secs = window
+            .as_secs()
+            .clamp(*LEARN_WINDOW.start(), *LEARN_WINDOW.end());
+        tokio::spawn(learn::run(devices::list(), Duration::from_secs(secs), tx));
     }
 
     async fn on_timer(&mut self) {
@@ -277,6 +316,7 @@ impl Machine {
         info!("configuration updated");
         self.cfg = cfg;
         self.session.update_from(&self.cfg).await;
+        self.sound.reconfigure(&self.cfg);
         self.spawn_readers();
         Ok(())
     }

@@ -28,7 +28,24 @@ running. `dnf remove` removes neither. Clear them out before installing:
     rm -f ~/.local/bin/alertu-gui ~/.local/bin/alertu-settings
     rm -f ~/.config/systemd/user/alertu-gui.service
 
-Four things this package deliberately does not do.
+What the package grants the daemon
+----------------------------------
+
+It installs /usr/share/polkit-1/rules.d/49-alertu.rules, which lets the `alertu`
+system user lock and unlock your graphical session without authenticating.
+
+Without that rule nothing locks. The daemon is not you, so `loginctl
+lock-session` is the privileged action org.freedesktop.login1.lock-sessions, and
+systemd ships it as auth_admin_keep for every subject: arming would fail with
+"Interactive authentication required" and the screen would stay up.
+
+logind describes that action as "Lock or unlock active sessions" and offers no
+separate action for locking alone, so the grant necessarily covers unlocking as
+well — which is what disarming needs anyway. The consequence is worth stating:
+anyone who achieves code execution as `alertu` can unlock your screen. Delete the
+file to withdraw the grant; arming stops working at the same time.
+
+Three things this package deliberately does not do.
 ----------------------------------------------------
 
 It does not start the daemon.
@@ -44,34 +61,42 @@ the `.deb`, which does start its daemon. Start it yourself:
 
     sudo systemctl enable --now alertu-daemon
 
-It does not start the tray for you.
------------------------------------
+It does not force the tray on either.
+-------------------------------------
 
-The tray is the primary way to use AlertU, but its unit is a *user* unit, and
-a system-level maintainer script has no business writing to your systemd user
-instance — a user-preset fragment would only apply to instances created after
-installation, which is not the one you are logged into. So, once per user:
+`%post` runs `systemctl --global preset alertu-gui.service`, the same preset
+convention one scope out: `--global` covers systemd user instances started after
+that point, so it needs no access to the user instance of whoever is logged in.
+Under Fedora's default policy that leaves the tray disabled, like the daemon.
+This is where the `.deb` diverges — it enables the tray outright. Turn it on for
+your account with:
 
     systemctl --user enable --now alertu-gui
 
-Without it the daemon runs and `alertu-ctl` works, but nothing appears in the
-system tray.
-
-It does not add you to the `alertu` group.
------------------------------------------
+It does not add you to the `alertu` group — but the settings window offers to.
+-----------------------------------------------------------------------------
 
 The daemon's control socket is mode 0660, owned by `alertu`. Anyone who can
 connect to it can disarm the alarm, read the configuration including the
 webhook URL, and redirect the paths handed to the helper programs. Group
 membership is therefore a privilege grant, not a convenience.
 
-A package cannot grant it: it does not know which account is yours, and RPM
-scriptlets have no business modifying existing accounts non-interactively. So:
+A package still cannot grant it: it does not know which account is yours, and
+RPM scriptlets have no business modifying existing accounts non-interactively.
+What it can do is make the grant one click instead of one command. Open the
+settings window; if this account cannot reach the daemon, it offers "Authorize
+this account", which runs
 
-    sudo usermod -aG alertu <user>
+    pkexec /usr/lib/alertu/alertu-authorize
 
-then log out and back in. Without it, the tray, the settings window and
-alertu-ctl will all fail to connect.
+behind one password prompt. That helper takes no arguments and reads the account
+to add from PKEXEC_UID, so it can only ever add its own caller — a helper that
+accepted a username would be a password-protected "add anyone to the group that
+commands the alarm", which is a worse deal than the plain `usermod` it replaces.
+
+Log out and back in afterwards: a process carries the groups it started with, so
+nothing already running picks the membership up. `sudo usermod -aG alertu <user>`
+still works if you would rather do it yourself.
 
 It does not ship a configuration file.
 --------------------------------------

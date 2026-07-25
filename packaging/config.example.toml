@@ -35,7 +35,12 @@ remote_name_hint = ""
 # Use any name evdev knows — KEY_ENTER, KEY_VOLUMEUP, KEY_RIGHT, KEY_PLAYPAUSE,
 # BTN_0… Presentation clickers commonly send KEY_RIGHT / KEY_LEFT; cheap
 # Bluetooth shutters commonly send KEY_VOLUMEUP or KEY_ENTER.
-toggle_keys = ["KEY_ENTER"]
+#
+# Get this wrong and the remote looks perfectly healthy while doing nothing: a
+# key the device cannot emit simply never matches. Many Bluetooth shutters
+# advertise no KEY_ENTER at all, so the daemon warns at startup when none of the
+# configured keys is one the remote can send, and lists the ones it can.
+toggle_keys = ["KEY_VOLUMEUP"]
 
 # --- Intrusion watch --------------------------------------------------------
 
@@ -62,6 +67,22 @@ session_id = "auto"
 beep_sound    = "/usr/share/sounds/alertu/beep.wav"
 warning_sound = "/usr/share/sounds/alertu/warning.wav"
 siren_sound   = "/usr/share/sounds/alertu/siren.wav"
+
+# ALSA device the sounds play on, e.g. "plughw:0,2". Empty lets whichever player
+# is found (paplay, pw-play, aplay, ffplay, play) pick its own destination.
+#
+# Set this on a system service. paplay and pw-play need a PipeWire/PulseAudio
+# server belonging to a *user session*, and the daemon's own `alertu` account has
+# none, so they fail with "Host is down" and the alarm stays mute. Naming a
+# device switches playback to `aplay -D`, straight at the hardware.
+#
+# `aplay -L` lists them. Prefer the built-in speaker: a siren playing into
+# headphones left on the desk protects nothing.
+#
+# One caveat — the device is opened exclusively, so if something else is already
+# playing through the raw device the siren cannot open it. PipeWire suspends idle
+# nodes, so the ordinary case (nothing playing) works.
+alsa_device = ""
 
 # --- Webcam snapshot --------------------------------------------------------
 
