@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-25
+
+Makes the alarm work out of the box. Two of the three fixes below were the
+difference between an installation that looked healthy and one that did
+anything at all.
+
+### Added
+
+- Guided pairing. **Pair remote** in the tray menu or the settings window (and
+  `alertu-ctl pair`) watches every input device, reports the first button press,
+  and saves the device together with the key it sends. Pairing previously meant
+  reading `list-devices`, deciding which `/dev/input/eventN` was the remote, then
+  guessing the evdev name of its button — and a wrong guess failed silently.
+  Matching is by device name, so a Bluetooth remote that returns on a different
+  node stays paired. The daemon only reports the press; the client saves it with
+  an ordinary `SetConfig`, so there is still one write path for the config.
+- An **Authorize this account** button in the settings window, shown when the
+  socket refuses this account. It runs a helper through `pkexec` that adds the
+  caller — and only the caller, read from `PKEXEC_UID` — to the `alertu` group,
+  replacing a documented `sudo usermod` step with one password prompt.
+- `alsa_device`, to route the alarm sounds at a specific ALSA device, with a
+  **Test** button that plays the beep *through the daemon* — the only process
+  whose groups and output settings decide whether a siren is actually heard.
+
+### Changed
+
+- The settings window shows what a working installation needs — the remote, the
+  audio output, the two delays — and collapses everything else under "Advanced
+  settings". Nothing was removed. It also picks up the website's palette, and
+  reuses the three colours the site already defines per alarm state.
+- The tray menu is five entries: state, arm/disarm, pair, settings, quit. The
+  device pickers, watch-list checkboxes and delay nudges it used to carry in
+  nested submenus live in the settings window, which is where a list of a dozen
+  input devices belongs.
+- `toggle_keys` defaults to `["KEY_VOLUMEUP"]` rather than `["KEY_ENTER"]`. The
+  cheap Bluetooth shutters this is usually paired with mostly advertise no
+  `KEY_ENTER` at all, so the previous default could not toggle anything on them.
+- The daemon warns at startup when none of the configured `toggle_keys` is a key
+  the remote is able to emit, and lists the keys the device does report. Such a
+  remote used to pair, resolve and stream events while silently doing nothing.
+
+### Fixed
+
+- The session never locked on a stock install. The daemon runs as the `alertu`
+  system user, so `loginctl lock-session` is the privileged polkit action
+  `org.freedesktop.login1.lock-sessions` and was refused with "Interactive
+  authentication required" — leaving the program's central function inoperative.
+  Both packages now ship `/usr/share/polkit-1/rules.d/49-alertu.rules`, polkit
+  became a hard dependency, and the manual install steps cover the rule.
+- The alarm was mute as a system service, with nothing in the log to explain it.
+  `paplay` and `pw-play` need a sound server owned by a user session, which the
+  `alertu` account does not have, and their stderr was discarded along with the
+  exit code. Playback failures are now logged with the player's own message, the
+  new `alsa_device` setting routes playback straight at the hardware, and the
+  daemon's account joined the `audio` group (`/dev/snd/*` is `0660 root:audio`).
+- A siren whose player failed immediately was respawned in a tight loop, burning
+  a core and flooding the journal for as long as the alarm lasted. It now waits
+  between attempts and gives up after three consecutive failures.
+
 ## [0.2.0] - 2026-07-22
 
 Adds a Fedora package. Nothing about the alarm itself changed.
@@ -98,6 +157,7 @@ tagged and shipped in it, but were left sitting under `[Unreleased]`.
   re-permissioned, so pointing `--socket` or `snapshot_dir` at a shared
   directory cannot wreck it.
 
-[Unreleased]: https://github.com/systm-d/alertU/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/systm-d/alertU/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/systm-d/alertU/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/systm-d/alertU/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/systm-d/alertU/releases/tag/v0.1.0

@@ -422,6 +422,44 @@ fn a_flag_with_no_value_aborts_startup() {
 /// socket carries whatever the umask produced — is not reachable by anyone
 /// outside the group. Without this second assertion that whole mechanism is
 /// untested: turning the directory into `0777` leaves every other test green.
+/// Pairing while armed is refused, rather than quietly learning the intrusion.
+///
+/// Deliberately the *refusal* path and not the happy path: a successful pairing
+/// would have the daemon open every real input device on the machine running the
+/// tests and wait for a keypress, which is neither hermetic nor polite. The
+/// refusal needs no devices at all.
+#[test]
+fn pairing_is_refused_while_armed() {
+    let harness = start();
+    let mut client = harness.connect();
+
+    client.arm().unwrap();
+    wait_until(Duration::from_secs(5), "the daemon to reach Armed", || {
+        client
+            .get_state()
+            .map(|s| s == GuardState::Armed)
+            .unwrap_or(false)
+    });
+
+    let err = client
+        .learn_remote(1)
+        .expect_err("pairing must be refused while armed");
+    let message = err.to_string();
+    assert!(
+        message.contains("disarm"),
+        "the refusal should say what to do about it; got: {message}"
+    );
+
+    // Still usable afterwards: a refused pairing must not wedge the machine.
+    client.disarm().unwrap();
+    wait_until(Duration::from_secs(5), "the daemon to reach Idle", || {
+        client
+            .get_state()
+            .map(|s| s == GuardState::Idle)
+            .unwrap_or(false)
+    });
+}
+
 #[test]
 fn the_control_socket_is_not_world_accessible() {
     let harness = start();

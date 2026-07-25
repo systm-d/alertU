@@ -50,6 +50,22 @@ pub enum Request {
     SetConfig(Box<Config>),
     /// Enumerate available input devices (daemon-side `evdev::enumerate`).
     ListDevices,
+    /// Watch every input device and report the first key press seen, so a remote
+    /// can be paired by pressing its button.
+    ///
+    /// The daemon only *reports* what it saw; applying it is an ordinary
+    /// [`Request::SetConfig`] from the client. Pairing therefore needs no new
+    /// write path, and a client can show the user what was detected before
+    /// committing to it.
+    LearnRemote { timeout_secs: u64 },
+    /// Play the beep once, through the daemon.
+    ///
+    /// The daemon is the only process that can prove the alarm is audible: it
+    /// runs as its own user, with its own groups and its own `alsa_device`, so a
+    /// sound the *client* can play says nothing about whether the siren will be
+    /// heard. Without this, checking the audio output means arming for real and
+    /// locking the screen to hear a chirp.
+    TestSound,
 }
 
 /// Replies and asynchronous pushes sent daemon → GUI.
@@ -64,6 +80,15 @@ pub enum Response {
     Config(Box<Config>),
     /// Device list (reply to `ListDevices`).
     Devices { devices: Vec<InputDeviceInfo> },
+    /// A key press was observed (reply to `LearnRemote`): which device sent it
+    /// and which evdev key name it was, ready to be written into a `Config`.
+    Learned {
+        path: PathBuf,
+        name: String,
+        key: String,
+    },
+    /// The learning window closed with no key press (reply to `LearnRemote`).
+    LearnTimedOut,
     /// Generic acknowledgement (reply to `SetConfig`, etc.).
     Ok,
     /// An error string describing why the last request failed.

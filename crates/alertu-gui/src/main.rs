@@ -213,7 +213,20 @@ async fn apply_response(handle: &ksni::Handle<AlertuTray>, resp: Response) {
             handle.update(move |t| t.devices = devices).await;
         }
         Response::Ok => {}
-        Response::Error { message } => warn!(%message, "daemon reported an error"),
+        Response::Learned { path, name, key } => {
+            handle
+                .update(move |t| t.finish_pairing(Some((path, name, key))))
+                .await;
+        }
+        Response::LearnTimedOut => {
+            handle.update(|t| t.finish_pairing(None)).await;
+        }
+        Response::Error { message } => {
+            warn!(%message, "daemon reported an error");
+            // A refused pairing (armed, no devices) leaves the tray showing
+            // "press a button" forever otherwise.
+            handle.update(|t| t.fail_pairing()).await;
+        }
     }
 }
 

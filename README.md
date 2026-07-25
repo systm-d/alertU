@@ -196,15 +196,26 @@ sudo install -Dm755 target/release/alertu-daemon   /usr/local/bin/alertu-daemon
 sudo install -Dm755 target/release/alertu-ctl      /usr/local/bin/alertu-ctl
 install  -Dm755 target/release/alertu-gui           ~/.local/bin/alertu-gui
 install  -Dm755 target/release/alertu-settings      ~/.local/bin/alertu-settings
-# Dedicated daemon account, in the groups it needs for /dev/input and the webcam.
+# Dedicated daemon account, in the groups it needs for /dev/input, the webcam
+# and the siren (/dev/snd/* is 0660 root:audio).
 sudo systemd-sysusers packaging/sysusers.d/alertu.conf
-# (equivalent one-liner: sudo useradd --system --groups input,video alertu)
+# (equivalent one-liner: sudo useradd --system --groups input,video,audio alertu)
 
 # Owned by the daemon: `SetConfig` persists, so the tray's device picker, the
 # settings window and `alertu-ctl set-config` all write this file back.
 sudo install -Dm644 -o alertu -g alertu packaging/config.example.toml /etc/alertu/config.toml
 sudo chown alertu:alertu /etc/alertu
 sudo install -Dm644 packaging/alertu-daemon.service /etc/systemd/system/alertu-daemon.service
+
+# Lets the daemon lock the session at all. Without it every arm fails with
+# "Interactive authentication required" and the screen never locks.
+sudo install -Dm644 packaging/polkit/49-alertu.rules /etc/polkit-1/rules.d/49-alertu.rules
+
+# Backs the settings window's "Authorize this account" button. The .policy file
+# names the helper's path, so install both or neither.
+sudo install -Dm755 packaging/helpers/alertu-authorize /usr/lib/alertu/alertu-authorize
+sudo install -Dm644 packaging/polkit/dev.systm-d.alertu.policy \
+  /usr/share/polkit-1/actions/dev.systm-d.alertu.policy
 
 # Before starting the daemon, so its first arm does not chirp into missing files.
 sudo alertu-ctl gen-sounds --dir /usr/share/sounds/alertu
@@ -215,6 +226,9 @@ sudo systemctl enable --now alertu-daemon
 # login must be in that group or the tray, the settings window and `alertu-ctl`
 # will all fail to connect. Log out and back in afterwards — group membership is
 # only picked up by a new session — or use `newgrp alertu` in the current shell.
+#
+# The settings window offers this as a button ("Authorize this account") once the
+# helper above is installed, which is the path the packages take.
 sudo usermod -aG alertu "$USER"
 
 install -Dm644 packaging/alertu-gui.service ~/.config/systemd/user/alertu-gui.service
@@ -232,6 +246,22 @@ gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 
 Make sure one of `fswebcam`/`ffmpeg` (snapshots) and one of
 `paplay`/`pw-play`/`aplay`/`ffplay`/`play` (audio) are installed.
+
+**Making the alarm audible.** Installing a player is necessary but not
+sufficient. `paplay` and `pw-play` connect to a PipeWire/PulseAudio server owned
+by a *user session*, and the daemon runs as the `alertu` system user, which has
+none: they exit with `pw_context_connect() failed: Host is down` and the alarm is
+mute. Point `alsa_device` at the hardware instead, which needs no session:
+
+```sh
+aplay -L                                     # list the candidates
+alertu-ctl get-config > /tmp/c.toml          # then set alsa_device = "plughw:0,2"
+alertu-ctl set-config /tmp/c.toml
+```
+
+Prefer the built-in speaker over a headset — a siren playing into headphones on
+the desk protects nothing. Playback failures are logged (`journalctl -u
+alertu-daemon`), so a mute alarm always says why.
 
 **Upgrading.** If you installed an earlier version, the control socket is now
 `0660` instead of world-connectable. Join the daemon's group and start a new
@@ -282,6 +312,7 @@ alertu-ctl toggle              # exactly what a remote click does
 alertu-ctl get-config          # the daemon's effective config, as TOML
 alertu-ctl set-config c.toml   # replace it (`-` reads stdin); validated locally first
 alertu-ctl list-devices        # the input devices the daemon can see
+alertu-ctl pair                # press a button on your remote; saves device + key
 
 alertu-ctl --json status       # {"event":"state","state":"idle"}
 alertu-ctl status --watch      # one line per state change, until interrupted
@@ -299,8 +330,39 @@ TOML, loaded at daemon startup and editable live from the tray. See
 [`packaging/config.example.toml`](packaging/config.example.toml) for every field
 with inline docs. Highlights: `remote_device`/`remote_name_hint`, `toggle_keys`,
 `watch_devices` (`["auto"]` or explicit paths), `grace_period_secs`,
-`alarm_delay_secs`, the three sound paths, `snapshot_dir`/`camera_device`, and
-the optional `alarm_webhook_url`.
+`alarm_delay_secs`, the three sound paths, `alsa_device`,
+`snapshot_dir`/`camera_device`, and the optional `alarm_webhook_url`.
+
+### Pairing a remote
+
+Click **Pair remote** in the tray menu or the settings window and press a button
+on the remote. That is the whole procedure: the daemon watches every input device
+at once, reports the first key press, and the front end saves the device *and*
+the key it sends.
+
+It matches by name (`remote_device = "auto"` plus `remote_name_hint`) rather than
+pinning `/dev/input/eventN`, because a Bluetooth remote that sleeps can come back
+on a different node.
+
+From a script, the same flow:
+
+```sh
+alertu-ctl pair              # prompts, waits 30s for a press, saves the result
+alertu-ctl pair --timeout 60
+```
+
+Setting `remote_device`/`toggle_keys` by hand still works, and the fields are
+still in the settings window. Two things make pairing worth preferring: only the
+daemon can see `/dev/input`, so a human has to translate a device list into a
+guess; and a `toggle_keys` entry the remote cannot physically emit never matches,
+which produces no error anywhere — just a remote that appears paired and never
+arms. Cheap Bluetooth shutters usually send `KEY_VOLUMEUP` and have no
+`KEY_ENTER` at all. The daemon warns at startup when the configured keys are all
+unemittable, and lists the ones the device does report:
+
+```sh
+journalctl -u alertu-daemon | grep toggle_keys
+```
 
 ## Platform
 

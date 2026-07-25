@@ -10,11 +10,17 @@ ExecStart=/usr/local/bin/alertu-daemon --config /etc/alertu/config.toml
 Restart=on-failure
 RestartSec=2
 
-# The daemon needs to read input devices and capture from the webcam. Running
-# as a dedicated user in the input+video groups is preferred over root; it also
-# needs to talk to logind over the system bus and place its socket in /run.
+# The daemon needs to read input devices, capture from the webcam and play the
+# siren. Running as a dedicated user in the input+video+audio groups is
+# preferred over root; it also needs to talk to logind over the system bus and
+# place its socket in /run.
+#
+# `audio` is what makes the alarm audible. /dev/snd/* is 0660 root:audio, and
+# this user has no session of its own, so paplay/pw-play cannot reach a
+# PipeWire/PulseAudio server and ALSA is the only route left — see the
+# `alsa_device` setting and the module docs in src/sound.rs.
 User=alertu
-SupplementaryGroups=input video
+SupplementaryGroups=input video audio
 RuntimeDirectory=alertu
 RuntimeDirectoryMode=0750
 StateDirectory=alertu

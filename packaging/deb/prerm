@@ -1,6 +1,17 @@
 #!/bin/sh
 set -e
 
+# Undo the `systemctl --global enable` from postinst, but only on a real removal:
+# on an upgrade dpkg runs prerm before unpacking the new version, and disabling
+# here would leave the tray off for everyone afterwards.
+case "$1" in
+remove)
+    if [ -x /usr/bin/systemctl ] || [ -x /bin/systemctl ]; then
+        systemctl --global disable alertu-gui.service >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+
 #DEBHELPER#
 
 exit 0

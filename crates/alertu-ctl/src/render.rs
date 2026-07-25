@@ -5,6 +5,7 @@
 //! running daemon.
 
 use alertu_common::config::Config;
+use alertu_common::ipc_client::LearnedRemote;
 use alertu_common::protocol::{InputDeviceInfo, Response};
 use alertu_common::state::GuardState;
 use anyhow::{Context, Result};
@@ -15,6 +16,8 @@ pub enum Outcome {
     State(GuardState),
     Config(Box<Config>),
     Devices(Vec<InputDeviceInfo>),
+    /// A pairing attempt: the remote learned, or `None` if nothing was pressed.
+    Paired(Option<LearnedRemote>),
     /// A command that only needed acknowledgement (arm/disarm/toggle/set-config).
     Ack,
 }
@@ -32,6 +35,12 @@ impl Outcome {
             Outcome::Devices(devices) => Response::Devices {
                 devices: devices.clone(),
             },
+            Outcome::Paired(Some(learned)) => Response::Learned {
+                path: learned.path.clone(),
+                name: learned.name.clone(),
+                key: learned.key.clone(),
+            },
+            Outcome::Paired(None) => Response::LearnTimedOut,
             Outcome::Ack => Response::Ok,
         }
     }
@@ -50,6 +59,16 @@ pub fn render(outcome: &Outcome, json: bool) -> Result<String> {
             .trim_end()
             .to_string(),
         Outcome::Devices(devices) => render_devices(devices),
+        Outcome::Paired(Some(learned)) => format!(
+            "paired {} ({}) on {}",
+            learned.name,
+            learned.key,
+            learned.path.display()
+        ),
+        Outcome::Paired(None) => {
+            "no button detected — the remote may be asleep; press a button to wake it and retry"
+                .to_string()
+        }
     })
 }
 

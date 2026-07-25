@@ -1,0 +1,39 @@
+#!/bin/sh
+# Add the invoking account to the `alertu` group.
+#
+# Run through pkexec from the settings window, so the user gets one password
+# prompt instead of a terminal and a `usermod` incantation. The polkit action is
+# declared in packaging/polkit/dev.systm-d.alertu.policy.
+#
+# It takes no arguments, deliberately. The account to add is read from
+# PKEXEC_UID — the uid pkexec recorded for the caller — so this can only ever
+# grant the group to whoever invoked it. Accepting a username would make a
+# password-protected "add anyone to the group that commands the alarm" helper,
+# which is a worse deal than the `sudo usermod` it replaces.
+
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    echo "alertu-authorize: takes no arguments" >&2
+    exit 2
+fi
+
+if [ -z "${PKEXEC_UID:-}" ]; then
+    echo "alertu-authorize: PKEXEC_UID unset — run this through pkexec" >&2
+    exit 2
+fi
+
+user="$(getent passwd "$PKEXEC_UID" | cut -d: -f1)"
+if [ -z "$user" ]; then
+    echo "alertu-authorize: no account for uid $PKEXEC_UID" >&2
+    exit 1
+fi
+
+# Already a member: nothing to do, and saying so beats a redundant write.
+if id -nG "$user" | tr ' ' '\n' | grep -qx alertu; then
+    echo "$user is already in the alertu group"
+    exit 0
+fi
+
+usermod -aG alertu "$user"
+echo "added $user to the alertu group"

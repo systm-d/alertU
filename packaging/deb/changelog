@@ -1,3 +1,19 @@
+alertu (0.3.0-1) unstable; urgency=medium
+
+  * Ships a polkit rule. Without it the daemon's `loginctl lock-session` was
+    refused with "Interactive authentication required", so the screen never
+    locked on a stock install. polkit is now a hard dependency.
+  * The daemon's account joins the `audio` group and a new `alsa_device`
+    setting routes the alarm at the hardware, so the siren is audible from a
+    system service. Playback failures are logged instead of discarded.
+  * Enables the tray for every account with `systemctl --global enable`, and
+    ships a pkexec helper behind the settings window's "Authorize this
+    account" button, replacing the manual `usermod` step.
+  * Guided pairing: press a button on the remote and AlertU records both the
+    device and the key it sends.
+
+ -- Kevin Delfour <kevin@delfour.co>  Sat, 25 Jul 2026 18:25:00 +0200
+
 alertu (0.2.0-1) unstable; urgency=medium
 
   * No change to the Debian package itself. This release adds a Fedora RPM

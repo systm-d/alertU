@@ -22,7 +22,7 @@ name = "alertu-daemon"
 path = "src/main.rs"
 
 [dependencies]
-alertu-common = { path = "../alertu-common", version = "0.2.0" }
+alertu-common = { path = "../alertu-common", version = "0.3.0" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -39,7 +39,7 @@ libc.workspace = true
 zbus.workspace = true
 
 [dev-dependencies]
-alertu-common = { path = "../alertu-common", version = "0.2.0", features = ["ipc-client"] }
+alertu-common = { path = "../alertu-common", version = "0.3.0", features = ["ipc-client"] }
 tempfile.workspace = true
 
 [lints]
@@ -66,7 +66,10 @@ a countdown, a siren, a timestamped webcam still and an optional webhook.
 A personal gadget, not an anti-theft system."""
 section = "utils"
 priority = "optional"
-depends = "$auto, systemd"
+# polkit is a hard dependency, not a nicety: the shipped rules file is inert
+# without it, and logind then refuses `lock-session` for everyone but root.
+# Named as an alternative because the package was policykit-1 before Debian 12.
+depends = "$auto, systemd, polkitd | policykit-1"
 # fswebcam first: apt installs the leading alternative, and ffmpeg drags in
 # GTK3, Mesa, SDL2 and some two hundred more packages to take one still.
 # libgl1/libxkbcommon0 are dlopen'ed by winit and glutin, so `$auto` cannot see
@@ -80,6 +83,14 @@ assets = [
     ["../../target/pkg-staging/user/alertu-gui.service", "usr/lib/systemd/user/", "644"],
     ["../../target/pkg-staging/sounds/*.wav", "usr/share/sounds/alertu/", "644"],
     ["../../packaging/sysusers.d/alertu.conf", "usr/lib/sysusers.d/", "644"],
+    # Not optional: without it `loginctl lock-session` is refused with
+    # "Interactive authentication required" and nothing ever locks.
+    ["../../packaging/polkit/49-alertu.rules", "usr/share/polkit-1/rules.d/", "644"],
+    # The "Authorize this account" button: an action pinned to one helper that
+    # can only add its own caller to the daemon's group. The .policy file names
+    # this exact path, so the two must move together.
+    ["../../packaging/polkit/dev.systm-d.alertu.policy", "usr/share/polkit-1/actions/", "644"],
+    ["../../packaging/helpers/alertu-authorize", "usr/lib/alertu/", "755"],
     ["../../packaging/alertu-settings.desktop", "usr/share/applications/", "644"],
     ["../../packaging/icons/hicolor/48x48/apps/alertu.png",   "usr/share/icons/hicolor/48x48/apps/",   "644"],
     ["../../packaging/icons/hicolor/64x64/apps/alertu.png",   "usr/share/icons/hicolor/64x64/apps/",   "644"],
@@ -128,6 +139,14 @@ assets = [
     { source = "../../target/pkg-staging/user/alertu-gui.service",      dest = "/usr/lib/systemd/user/alertu-gui.service",      mode = "644" },
     { source = "../../target/pkg-staging/sounds/*.wav", dest = "/usr/share/sounds/alertu/", mode = "644" },
     { source = "../../packaging/sysusers.d/alertu.conf", dest = "/usr/lib/sysusers.d/alertu.conf", mode = "644" },
+    # Not optional: without it `loginctl lock-session` is refused with
+    # "Interactive authentication required" and nothing ever locks.
+    { source = "../../packaging/polkit/49-alertu.rules", dest = "/usr/share/polkit-1/rules.d/49-alertu.rules", mode = "644" },
+    # The "Authorize this account" button: an action pinned to one helper that
+    # can only add its own caller to the daemon's group. The .policy file names
+    # this exact path, so the two must move together.
+    { source = "../../packaging/polkit/dev.systm-d.alertu.policy", dest = "/usr/share/polkit-1/actions/dev.systm-d.alertu.policy", mode = "644" },
+    { source = "../../packaging/helpers/alertu-authorize", dest = "/usr/lib/alertu/alertu-authorize", mode = "755" },
     { source = "../../packaging/alertu-settings.desktop", dest = "/usr/share/applications/alertu-settings.desktop", mode = "644" },
     { source = "../../packaging/icons/hicolor/48x48/apps/alertu.png",   dest = "/usr/share/icons/hicolor/48x48/apps/alertu.png",   mode = "644" },
     { source = "../../packaging/icons/hicolor/64x64/apps/alertu.png",   dest = "/usr/share/icons/hicolor/64x64/apps/alertu.png",   mode = "644" },
@@ -150,6 +169,10 @@ assets = [
 # one distribution's package layout.
 [package.metadata.generate-rpm.requires]
 "/usr/bin/loginctl" = "*"
+# The shipped polkit rule is inert without polkit, and logind then refuses
+# `lock-session` for everyone but root — so the lock, the program's whole
+# purpose, would never work.
+polkit = "*"
 
 # Weak dependencies: dnf installs them by default, the user may remove them,
 # and an unresolvable one is silently ignored.

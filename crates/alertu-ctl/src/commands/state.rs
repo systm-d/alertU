@@ -72,7 +72,14 @@ fn watch_states(client: &mut Client, json: bool) -> Result<()> {
             }
             // Device-list pushes also arrive on a subscribed connection;
             // they are not state changes, so `status` ignores them.
-            Response::Devices { .. } | Response::Config(_) | Response::Ok => {}
+            // Pairing replies answer a `LearnRemote` on whichever connection
+            // sent it, so they cannot reach a `status --watch` loop; ignored for
+            // the same reason as the device list.
+            Response::Devices { .. }
+            | Response::Config(_)
+            | Response::Ok
+            | Response::Learned { .. }
+            | Response::LearnTimedOut => {}
             Response::Error { message } => anyhow::bail!(message),
         }
     }

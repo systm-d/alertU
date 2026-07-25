@@ -41,6 +41,66 @@ pub fn spawn_watch(path: PathBuf, tx: mpsc::Sender<InputSignal>) -> JoinHandle<(
     tokio::spawn(reader(path, Role::Watch, tx))
 }
 
+/// Cap on how many key names a diagnostic lists before eliding the rest. A
+/// remote reports a handful; a full keyboard reports several hundred, and the
+/// point of the message is to be readable, not exhaustive.
+const MAX_LISTED_KEYS: usize = 12;
+
+/// Warn when `toggle_keys` names keys the remote cannot physically emit.
+///
+/// A key absent from the device's capabilities is a silent dead end: the
+/// `Role::Remote` arm in [`reader`] never matches, so the remote looks entirely
+/// healthy — it resolves, it opens, it streams events — and yet nothing ever
+/// arms. Cheap Bluetooth shutters are the common case: most advertise
+/// `KEY_VOLUMEUP` and no `KEY_ENTER`, so they cannot toggle anything until
+/// `toggle_keys` is changed. Say so, and name what the device does send.
+fn warn_about_unusable_keys(device: &Device, keys: &[KeyCode], dev_path: &str, name: &str) {
+    // No key capabilities advertised at all: nothing to compare against, and
+    // the reader is about to be useless for other reasons anyway.
+    let Some(supported) = device.supported_keys() else {
+        return;
+    };
+
+    let unusable: Vec<KeyCode> = keys
+        .iter()
+        .copied()
+        .filter(|key| !supported.contains(*key))
+        .collect();
+    if unusable.is_empty() {
+        return;
+    }
+
+    if unusable.len() < keys.len() {
+        // At least one key still works, so the remote is usable as configured.
+        warn!(
+            device = %dev_path,
+            %name,
+            ignored = ?unusable,
+            "some configured toggle_keys cannot be emitted by this remote"
+        );
+        return;
+    }
+
+    let total = supported.iter().count();
+    let mut emits: Vec<String> = supported
+        .iter()
+        .take(MAX_LISTED_KEYS)
+        .map(|key| format!("{key:?}"))
+        .collect();
+    if total > MAX_LISTED_KEYS {
+        emits.push(format!("... (+{} more)", total - MAX_LISTED_KEYS));
+    }
+
+    warn!(
+        device = %dev_path,
+        %name,
+        configured = ?keys,
+        device_emits = ?emits,
+        "none of the configured toggle_keys can be emitted by this remote, so it \
+         will never arm or disarm. Set `toggle_keys` to a key this device reports"
+    );
+}
+
 async fn reader(path: PathBuf, role: Role, tx: mpsc::Sender<InputSignal>) {
     let dev_path = path.display().to_string();
 
@@ -52,6 +112,10 @@ async fn reader(path: PathBuf, role: Role, tx: mpsc::Sender<InputSignal>) {
         }
     };
     let name = device.name().unwrap_or("<unnamed>").to_string();
+
+    if let Role::Remote(keys) = &role {
+        warn_about_unusable_keys(&device, keys, &dev_path, &name);
+    }
 
     let mut stream = match device.into_event_stream() {
         Ok(s) => s,

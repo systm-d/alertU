@@ -1,11 +1,13 @@
 //! Unix-socket IPC server: newline-delimited JSON, one connection per GUI.
 
+use crate::learn;
 use crate::machine::Control;
 use crate::perms::{self, Privileges};
 use alertu_common::protocol::{InputDeviceInfo, Request, Response};
 use alertu_common::state::GuardState;
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -234,6 +236,26 @@ async fn dispatch(
         Request::ListDevices => Response::Devices {
             devices: devices_rx.borrow().clone(),
         },
+        Request::TestSound => send_ctrl(ctrl_tx, Control::TestSound).await,
+        Request::LearnRemote { timeout_secs } => {
+            let (tx, rx) = oneshot::channel();
+            let window = Duration::from_secs(timeout_secs);
+            if ctrl_tx
+                .send(Control::LearnRemote(window, tx))
+                .await
+                .is_err()
+            {
+                return daemon_gone();
+            }
+            match rx.await {
+                Ok(Ok(learn::Outcome::Learned { path, name, key })) => {
+                    Response::Learned { path, name, key }
+                }
+                Ok(Ok(learn::Outcome::TimedOut)) => Response::LearnTimedOut,
+                Ok(Err(message)) => Response::Error { message },
+                Err(_) => daemon_gone(),
+            }
+        }
     }
 }
 

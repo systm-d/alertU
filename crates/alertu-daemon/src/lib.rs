@@ -10,6 +10,7 @@ pub mod devices;
 pub mod hotplug;
 pub mod input;
 pub mod ipc;
+pub mod learn;
 pub mod machine;
 #[allow(unsafe_code)]
 pub mod perms;

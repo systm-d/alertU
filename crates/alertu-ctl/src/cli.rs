@@ -48,6 +48,12 @@ pub enum Command {
     },
     /// List the input devices the daemon can see.
     ListDevices,
+    /// Pair a remote by pressing one of its buttons, and save it.
+    Pair {
+        /// Seconds to wait for a button press.
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
+    },
     /// Write the default sound files (beep, warning tick, siren) into a directory.
     GenSounds {
         /// Destination directory, e.g. /usr/share/sounds/alertu.
@@ -74,6 +80,7 @@ pub fn run(cli: &Cli) -> Result<(), CliError> {
         Command::GetConfig => commands::config::get(socket, json),
         Command::SetConfig { file } => commands::config::set(socket, json, file),
         Command::ListDevices => commands::devices::list(socket, json),
+        Command::Pair { timeout } => commands::pair::run(socket, json, *timeout),
         // Never opens a socket, so it takes no socket path.
         Command::GenSounds { dir, force } => commands::gen_sounds::run(json, dir, *force),
     }
