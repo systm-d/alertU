@@ -1,0 +1,14 @@
+# Avancement du projet — agrégé par `ws projects` à la racine du workspace.
+# phase   : idée | prototype | bêta | publié | maintenance | pause | archivé
+# canal   : où le public obtient le projet (obligatoire si phase = publié).
+#           Indépendant de la visibilité du dépôt sur GitHub.
+# jalon   : prochaine étape. Un jalon GitHub du même nom prime sur les tâches.
+phase: bêta
+canal: "https://systm-d.github.io/alertU/"
+jalon: ""
+maj: 2026-08-29
+taches:
+  faites: []
+  restantes: []
+notes: |
+  Phase devinée à l'amorçage d'après le tag v0.3.0 — à relire.
