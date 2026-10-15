@@ -19,7 +19,7 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "process", "signal"] }
-directories = "5"
+directories = "6"
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
 libc = "0.2"
